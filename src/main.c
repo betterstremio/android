@@ -14,6 +14,14 @@
 #include <execinfo.h>
 static void on_alarm(int sig) { (void)sig; void *fr[48]; int n = backtrace(fr, 48); backtrace_symbols_fd(fr, n, 2); _exit(3); }
 static volatile int profN; /* the profiler is the TV's */
+#elif defined(__ANDROID__)
+/* Android: the crash is logged, then handed back to the system, which writes its own report (a tombstone, in logcat) */
+static volatile int profN;
+static void prof_start(void) {}
+static void prof_report(void) {}
+static void on_crash(int sig, siginfo_t *si, void *uc) { (void)uc;
+  char b[160]; int n = snprintf(b, sizeof b, "[crash] signal %d addr %p\n", sig, si ? si->si_addr : NULL); if (write(2, b, n) < 0) {}
+  signal(sig, SIG_DFL); raise(sig); }
 #else
 #include <ucontext.h>
 #include <time.h>
@@ -113,11 +121,11 @@ static void screenshot(const char *path, int w, int h) {
   stbi_write_png(path, w, h, 4, flip, w * 4); free(px); free(flip);
   fprintf(stderr, "[shot] %s\n", path);
 }
-/* SB_PLAY_FROM="Mock Addon" (with SB_PLAY_TYPE / SB_PLAY_ID / SB_PLAY_VID): plays that addon's first stream */
+/* SB_PLAY_FROM="Mock Addon" or "*p2p" (with SB_PLAY_TYPE / SB_PLAY_ID / SB_PLAY_VID): plays that addon's first stream */
 static int playFromDone;
 static void pf_part(StreamGroup *g, int gi, void *ud) { (void)gi; (void)ud;
   int nth = getenv("SB_PLAY_NTH") ? atoi(getenv("SB_PLAY_NTH")) : 0; /* the nth of its streams (an externalUrl one too) */
-  for (int i = 0; i < g->n && !playFromDone; i++) if (!strcmp(g->items[i].addon, getenv("SB_PLAY_FROM")) && (nth ? i == nth : g->items[i].url[0] != 0)) { playFromDone = 1; Stream s = g->items[i];
+  for (int i = 0; i < g->n && !playFromDone; i++) if ((!strcmp(getenv("SB_PLAY_FROM"), "*p2p") ? g->items[i].p2p : !strcmp(g->items[i].addon, getenv("SB_PLAY_FROM"))) && (nth ? i == nth : g->items[i].url[0] != 0)) { /* "*p2p": the first P2P stream of any addon */ playFromDone = 1; Stream s = g->items[i];
     const char *ty = getenv("SB_PLAY_TYPE") ? getenv("SB_PLAY_TYPE") : "movie", *id = getenv("SB_PLAY_ID") ? getenv("SB_PLAY_ID") : "tt0111161"; app_play(&s, ty, id, getenv("SB_PLAY_VID") ? getenv("SB_PLAY_VID") : id, 0); }
   free(g->items); }
 static void pf_done(int total, void *ud) { (void)ud; if (!playFromDone) fprintf(stderr, "[dev] no stream from %s (%d in all)\n", getenv("SB_PLAY_FROM"), total); }

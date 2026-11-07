@@ -154,15 +154,18 @@ void gfx_fill_report(char *out, int cap) { /* screens' worth per frame: shape, i
   memset(fillA, 0, sizeof fillA); fillFrames = 0; }
 int gfx_quads(void) { return quadsDrawn; }
 
+/* an attribute the shader left out has location -1: skipped (the TVs ignore the call, some drivers log an error per call) */
+static void va_on(GLint a) { if (a >= 0) glEnableVertexAttribArray((GLuint)a); }
+static void va(GLint a, GLint n, GLenum t, GLboolean norm, const void *ptr) { if (a >= 0) glVertexAttribPointer((GLuint)a, n, t, norm, sizeof(Vtx), ptr); }
 static void use(int p) {
   Prog *P = &progs[p]; glUseProgram(P->prog);
   glUniform1f(P->uScale, scl); glUniform2f(P->uView, (float)surfW, (float)surfH);
   if (P->uTex >= 0) glUniform1i(P->uTex, 0);
-  glEnableVertexAttribArray(P->aPos); glVertexAttribPointer(P->aPos, 2, GL_FLOAT, GL_FALSE, sizeof(Vtx), (void *)0);
-  glEnableVertexAttribArray(P->aUv); glVertexAttribPointer(P->aUv, 2, GL_FLOAT, GL_FALSE, sizeof(Vtx), (void *)8);
-  glEnableVertexAttribArray(P->aCol); glVertexAttribPointer(P->aCol, 4, GL_UNSIGNED_BYTE, GL_TRUE, sizeof(Vtx), (void *)16);
-  glEnableVertexAttribArray(P->aRect); glVertexAttribPointer(P->aRect, 4, GL_FLOAT, GL_FALSE, sizeof(Vtx), (void *)20);
-  glEnableVertexAttribArray(P->aPar); glVertexAttribPointer(P->aPar, 4, GL_FLOAT, GL_FALSE, sizeof(Vtx), (void *)36);
+  va_on(P->aPos); va(P->aPos, 2, GL_FLOAT, GL_FALSE, (void *)0);
+  va_on(P->aUv); va(P->aUv, 2, GL_FLOAT, GL_FALSE, (void *)8);
+  va_on(P->aCol); va(P->aCol, 4, GL_UNSIGNED_BYTE, GL_TRUE, (void *)16);
+  va_on(P->aRect); va(P->aRect, 4, GL_FLOAT, GL_FALSE, (void *)20);
+  va_on(P->aPar); va(P->aPar, 4, GL_FLOAT, GL_FALSE, (void *)36);
 }
 void gfx_flush(void) {
   if (!nvtx) return;
@@ -179,7 +182,7 @@ void gfx_flush(void) {
     clientVtx = getenv("SB_CLIENTVTX") != NULL;
 #endif
   }
-  if (clientVtx) { glBindBuffer(GL_ARRAY_BUFFER, 0); Prog *P = &progs[curProg]; glVertexAttribPointer(P->aPos, 2, GL_FLOAT, GL_FALSE, sizeof(Vtx), &vtx[0].x); glVertexAttribPointer(P->aUv, 2, GL_FLOAT, GL_FALSE, sizeof(Vtx), &vtx[0].u); glVertexAttribPointer(P->aCol, 4, GL_UNSIGNED_BYTE, GL_TRUE, sizeof(Vtx), &vtx[0].color); glVertexAttribPointer(P->aRect, 4, GL_FLOAT, GL_FALSE, sizeof(Vtx), &vtx[0].cx); glVertexAttribPointer(P->aPar, 4, GL_FLOAT, GL_FALSE, sizeof(Vtx), &vtx[0].radius); glDrawArrays(GL_TRIANGLES, 0, nvtx); }
+  if (clientVtx) { glBindBuffer(GL_ARRAY_BUFFER, 0); Prog *P = &progs[curProg]; va(P->aPos, 2, GL_FLOAT, GL_FALSE, &vtx[0].x); va(P->aUv, 2, GL_FLOAT, GL_FALSE, &vtx[0].u); va(P->aCol, 4, GL_UNSIGNED_BYTE, GL_TRUE, &vtx[0].color); va(P->aRect, 4, GL_FLOAT, GL_FALSE, &vtx[0].cx); va(P->aPar, 4, GL_FLOAT, GL_FALSE, &vtx[0].radius); glDrawArrays(GL_TRIANGLES, 0, nvtx); }
   else {
   if (vboOff + bytes > vboCap) { glBufferData(GL_ARRAY_BUFFER, vboCap, NULL, GL_STREAM_DRAW); vboOff = 0; } /* full: orphan and start again */
   glBufferSubData(GL_ARRAY_BUFFER, vboOff, bytes, vtx);

@@ -137,6 +137,9 @@ static void fb_init(void) {
 #ifdef SB_MAC
   if (!dir) { dir = "/System/Library/Fonts"; exact = 1; }
 #endif
+#ifdef __ANDROID__
+  if (!dir) dir = "/system/fonts"; /* about 250 files: the weights and styles are left out below, one face per script stays */
+#endif
   if (!dir) dir = "/usr/share/fonts";
   if (exact) { for (unsigned i = 0; i < sizeof MACFONTS / sizeof *MACFONTS; i++) { char p[400]; snprintf(p, sizeof p, "%s/%s", dir, MACFONTS[i].name); if (!access(p, R_OK)) fb_add(dir, MACFONTS[i].name, MACFONTS[i].cls, MACFONTS[i].sc); } return; }
   static char names[96][96]; int nn = 0; DIR *d = opendir(dir); struct dirent *e;
@@ -145,6 +148,10 @@ static void fb_init(void) {
   if (!d) { fprintf(stderr, "[text] system fonts %s not readable (%s): bundled fonts only\n", dir, strerror(errno)); return; }
   while ((e = readdir(d)) && nn < 96) { const char *x = strrchr(e->d_name, '.');
     if (!x || (strcasecmp(x, ".ttf") && strcasecmp(x, ".otf") && strcasecmp(x, ".ttc")) || strstr(e->d_name, "LastResort") || strlen(e->d_name) >= 96) continue;
+#ifdef __ANDROID__
+    { static const char *skip[] = { "Bold", "Italic", "Light", "Thin", "Medium", "Black", "Semi", "Condensed", "Roboto", "Mono", "Display", "Serif", "Cutive", "Coming", "Dancing", "Carrois", "Clock", NULL };
+      int sk = 0; for (int q = 0; skip[q] && !sk; q++) if (strstr(e->d_name, skip[q])) sk = 1; if (sk) continue; }
+#endif
     snprintf(names[nn++], 96, "%s", e->d_name); }
   closedir(d); qsort(names, nn, sizeof names[0], cmp_name);
   char used[96] = { 0 };

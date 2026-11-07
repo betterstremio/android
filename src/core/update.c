@@ -26,6 +26,14 @@
 #ifndef SB_APP_ID
 #define SB_APP_ID "tv.stremioorigin.app"
 #endif
+/* this build's own package kind among the release's files: <appid>_<x.y.z><PKG_KIND> */
+#ifdef __ANDROID__
+#include "platform/android/bridge.h"
+#define PKG_KIND "_android.apk"
+#else
+#define PKG_KIND "_arm.ipk"
+#endif
+#define PKG_KIND_LEN (sizeof PKG_KIND - 1)
 
 #define UPD_GH "https://api.github.com/repos/betterstremio/webos/releases?per_page=8"
 #define UPD_MAN "https://betterstremio.github.io/webos/api/apps/" SB_APP_ID "/manifest.json"
@@ -108,8 +116,7 @@ static void done(const Rel *best, int manual) {
   if (best && U.cur[0] && ver_cmp(best->ver, U.cur) > 0) {
     U.avail = *best; U.has = 1; U.state = UPD_AVAIL; store_set("updVer", best->ver);
     fprintf(stderr, "[update] %s available (running %s)\n", best->ver, U.cur);
-    if (!manual) { if (player_open()) pillPend = 1; else pill_show(); } /* (never over a film: after it) */
-  } else {
+    if (!manual) { if (player_open()) pillPend = 1; else pill_show(); } /* (never over a film: after it) */  } else {
     int none = best || reached;
     U.has = 0; U.state = none ? UPD_NONE : UPD_ERROR; store_remove("updVer");
     fprintf(stderr, "[update] %s\n", none ? "up to date" : "could not check");
@@ -124,7 +131,7 @@ static void on_manifest(int st, const unsigned char *body, size_t len, void *ud)
   cJSON *v = cJSON_GetObjectItemCaseSensitive(m, "version"), *u = cJSON_GetObjectItemCaseSensitive(m, "ipkUrl"), *h = cJSON_GetObjectItemCaseSensitive(cJSON_GetObjectItemCaseSensitive(m, "ipkHash"), "sha256");
   if (cJSON_IsString(v) && cJSON_IsString(u) && cJSON_IsString(h) && *v->valuestring && *u->valuestring && *h->valuestring) {
     size_t ul = strlen(u->valuestring);
-    if (ul > 8 && !strcmp(u->valuestring + ul - 8, "_arm.ipk")) { /* the listing may name another build under the same id: only this package's kind */
+    if (ul > PKG_KIND_LEN && !strcmp(u->valuestring + ul - PKG_KIND_LEN, PKG_KIND)) { /* the listing may name another build under the same id: only this package's kind */
       ok = 1; snprintf(r.ver, sizeof r.ver, "%s", v->valuestring); snprintf(r.url, sizeof r.url, "%s", u->valuestring); snprintf(r.sha, sizeof r.sha, "%s", h->valuestring);
       cJSON *ns = cJSON_GetObjectItemCaseSensitive(m, "notes"), *x;
       if (cJSON_IsArray(ns)) { cJSON_ArrayForEach(x, ns) if (r.nnotes < 5 && cJSON_IsString(x)) snprintf(r.notes[r.nnotes++], 256, "%s", x->valuestring); }
@@ -145,7 +152,7 @@ static void on_releases(int st, const unsigned char *body, size_t len, void *ud)
       cJSON *nm = cJSON_GetObjectItemCaseSensitive(a, "name"), *dg = cJSON_GetObjectItemCaseSensitive(a, "digest"), *du = cJSON_GetObjectItemCaseSensitive(a, "browser_download_url");
       if (!cJSON_IsString(nm) || !cJSON_IsString(dg) || !cJSON_IsString(du)) continue;
       const char *n = nm->valuestring; int x, y, z, used = 0;
-      if (strncmp(n, pre, pl) || sscanf(n + pl, "%d.%d.%d%n", &x, &y, &z, &used) != 3 || strcmp(n + pl + used, "_arm.ipk")) continue; /* ^<appid>_(\d+\.\d+\.\d+)_arm\.ipk$ */
+      if (strncmp(n, pre, pl) || sscanf(n + pl, "%d.%d.%d%n", &x, &y, &z, &used) != 3 || strcmp(n + pl + used, PKG_KIND)) continue; /* ^<appid>_(\d+\.\d+\.\d+)_arm\.ipk$ (_android.apk on Android) */
       { const char *q = n + pl; for (int i = 0; i < used; i++) if (!((q[i] >= '0' && q[i] <= '9') || q[i] == '.')) used = -1; if (used < 0) continue; }
       if (strncmp(dg->valuestring, "sha256:", 7) || !is_hex64(dg->valuestring + 7)) continue;
       char ver[24]; snprintf(ver, sizeof ver, "%.*s", used, n + pl);
@@ -208,6 +215,12 @@ void update_install(void) {
   if (U.state == UPD_INSTALLING) return;
   U.state = UPD_INSTALLING; snprintf(U.msg, sizeof U.msg, "%s", T("Downloading…")); changed();
   fprintf(stderr, "[update] installing %s\n", U.avail.ver);
+#ifdef __ANDROID__
+  /* the APK is downloaded and its SHA-256 checked on the Java side, then handed to the system's installer, which asks
+     the user once (and, the first time, sends them to allow installs from this app) */
+  if (!andr_install_start(U.avail.url, U.avail.sha, U.avail.ver)) { U.state = UPD_AVAIL; snprintf(U.msg, sizeof U.msg, "%s", T("The update failed")); changed(); }
+  return;
+#endif
   relaunch_arm();
   cJSON *p = cJSON_CreateObject(); cJSON_AddStringToObject(p, "ipkUrl", U.avail.url); cJSON_AddStringToObject(p, "ipkHash", U.avail.sha); cJSON_AddStringToObject(p, "id", SB_APP_ID); cJSON_AddTrueToObject(p, "subscribe");
   char *ps = cJSON_PrintUnformatted(p); cJSON_Delete(p);
@@ -296,6 +309,11 @@ void update_pill_draw(float setX) {
 void update_tick(float dt) {
   tween_tick(&U.pa, dt); tween_tick(&U.slide, dt); tween_tick(&U.dot, dt); sglass_tick(&U.glass, dt);
   plat_luna_pump();
+#ifdef __ANDROID__
+  if (U.state == UPD_INSTALLING) { char m[240]; int st = andr_install_poll(m, sizeof m);
+    if (st < 0) { U.state = UPD_AVAIL; snprintf(U.msg, sizeof U.msg, "%s", T1("The update failed: {e}", "e", m)); fprintf(stderr, "[update] install failed: %s\n", m); toast(T("The update failed"), 2500, NULL); changed(); }
+    else if (m[0] && strcmp(m, U.msg)) { snprintf(U.msg, sizeof U.msg, "%s", m); fprintf(stderr, "[update] %s\n", m); changed(); } }
+#endif
   if (U.pf && !topNav.active) { U.pf = 0; U.hideAt = app_now() + 4; } /* the highlight left the top bar */
   if (U.pill && U.hideAt && app_now() >= U.hideAt) pill_hide();
   if (U.n.pend && !U.pill && U.pa.v <= 0.001f && !player_open()) { /* the other notice, once the capsule is back in */

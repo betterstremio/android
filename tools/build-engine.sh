@@ -32,9 +32,21 @@ fi
 case "$TARGET" in
   webos) ZT="-target arm-linux-gnueabi.${GLIBC:-2.17} -mcpu=cortex_a9-neon -mfloat-abi=softfp"; OUT="$ROOT/build/webos/libsbengine.so"; SYS=Linux; PROC=arm ;;   # soft-float ABI like the app; this compiler drops NEON from the assembler there, so libtorrent takes its portable paths
   mac)   ZT=""; OUT="$ROOT/build/mac/libsbengine.dylib"; SYS=Darwin; PROC=aarch64 ;;
+  android-*) ABI="${TARGET#android-}"; OUT="${ENGINE_OUT:-$ROOT/build/android/$ABI/libsbengine.so}"; NDK="${NDK:-$HOME/android-sdk/ndk/27.2.12479018}"; API="${API:-24}" ;;   # arm64-v8a, armeabi-v7a, x86 (the emulator)
   *) echo "unknown target $TARGET"; exit 1 ;;
 esac
 TC="$W/tc-$TARGET"; mkdir -p "$TC"
+if [[ "$TARGET" == android-* ]]; then   # the NDK's own toolchain file; its clang links the library
+  case "$ABI" in arm64-v8a) TRIPLE=aarch64-linux-android;; armeabi-v7a) TRIPLE=armv7a-linux-androideabi;; x86) TRIPLE=i686-linux-android;; x86_64) TRIPLE=x86_64-linux-android;; *) echo "unknown ABI $ABI"; exit 1;; esac
+  NDKBIN="$NDK/toolchains/llvm/prebuilt/linux-x86_64/bin"
+  printf '#!/bin/sh
+exec "%s" --target=%s%s "$@"
+' "$NDKBIN/clang++" "$TRIPLE" "$API" > "$TC/c++"; chmod 755 "$TC/c++"
+  printf 'include("%s")
+' "$NDK/build/cmake/android.toolchain.cmake" > "$TC/toolchain.cmake"
+  TCX=(-DANDROID_ABI="$ABI" -DANDROID_PLATFORM="android-$API" -DANDROID_STL=c++_static)
+else
+TCX=()
 printf '#!/bin/sh\nexec "%s" cc %s "$@"\n' "$ZIG" "$ZT" > "$TC/cc"; printf '#!/bin/sh\nexec "%s" c++ %s "$@"\n' "$ZIG" "$ZT" > "$TC/c++"
 printf '#!/bin/sh\nexec "%s" ar "$@"\n' "$ZIG" > "$TC/ar"; printf '#!/bin/sh\nexec "%s" ranlib "$@"\n' "$ZIG" > "$TC/ranlib"
 chmod 755 "$TC/cc" "$TC/c++" "$TC/ar" "$TC/ranlib"
@@ -50,24 +62,26 @@ set(CMAKE_FIND_ROOT_PATH_MODE_LIBRARY ONLY)
 set(CMAKE_FIND_ROOT_PATH_MODE_INCLUDE ONLY)
 set(CMAKE_FIND_ROOT_PATH_MODE_PACKAGE ONLY)
 T
+fi
 B="$W/build-$TARGET"
 SSL=(-DCMAKE_DISABLE_FIND_PACKAGE_OpenSSL=ON); SSLLIB=()
 if [ "$TARGET" = mac ]; then OSSL="$(brew --prefix openssl@3)"; SSL=(-DOPENSSL_ROOT_DIR="$OSSL"); SSLLIB=("$OSSL/lib/libssl.a" "$OSSL/lib/libcrypto.a"); export PKG_CONFIG_PATH="$OSSL/lib/pkgconfig"; fi   # the engine needs it on macOS (system trust store)
 FL="-ffunction-sections -fdata-sections -fvisibility=hidden -fvisibility-inlines-hidden -D_LARGEFILE64_SOURCE -D_LARGEFILE_SOURCE -D_FILE_OFFSET_BITS=64 -ffile-prefix-map=$HOME=/src -ffile-prefix-map=$ROOT=/app"   # no local paths in the library (source names in asserts)
+if [[ "$TARGET" == android-* ]]; then FL="$FL -fexperimental-library"; fi   # the NDK's libc++ 18 keeps std::stop_token behind it
 if [ "$TARGET" = mac ]; then mkdir -p "$W/ossl3"; ln -sfn "$OSSL/include/openssl" "$W/ossl3/openssl"; FL="$FL -I$W/ossl3"; fi   # OpenSSL 3 ahead of the compiler's own /opt/homebrew/include (OpenSSL 4 there does not build the pinned libtorrent; the same folder given twice is dropped, hence the link)
 [ "$TARGET" = mac ] && [ -n "${ENGINE_MAC_PREBUILT:-}" ] || cmake -S "$SRC" -B "$B" -G Ninja -DNUVIO_ENGINE_ENABLE_LIBTORRENT=ON -DNUVIO_ENGINE_BUILD_TESTS=OFF \
   -DFETCHCONTENT_SOURCE_DIR_NUVIO_BOOST="$DEPS/nuvio_boost-src" -DFETCHCONTENT_SOURCE_DIR_NUVIO_LIBTORRENT="$DEPS/nuvio_libtorrent-src" \
-  -DCMAKE_TOOLCHAIN_FILE="$TC/toolchain.cmake" -DCMAKE_BUILD_TYPE=MinSizeRel -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
+  -DCMAKE_TOOLCHAIN_FILE="$TC/toolchain.cmake" "${TCX[@]}" -DCMAKE_BUILD_TYPE=MinSizeRel -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
   "${SSL[@]}" -DCMAKE_DISABLE_FIND_PACKAGE_GnuTLS=ON -DCMAKE_DISABLE_FIND_PACKAGE_LibGcrypt=ON \
   -DCMAKE_C_FLAGS="$FL" -DCMAKE_CXX_FLAGS="$FL" >/dev/null
 if [ "$TARGET" = mac ] && [ -n "${ENGINE_MAC_PREBUILT:-}" ]; then B="$ENGINE_MAC_PREBUILT"   # the Mac preview only: archives built earlier (Homebrew's newer OpenSSL no longer compiles the pinned libtorrent)
 else ninja -j "${ENGINE_JOBS:-4}" -C "$B" nuvio_engine; fi   # a few jobs: the Mac stays usable
 mkdir -p "$(dirname "$OUT")"
 LT="$B/_deps/nuvio_libtorrent-build/libtorrent-rasterbar.a"
-if [ "$TARGET" = webos ]; then
+if [ "$TARGET" = webos ] || [[ "$TARGET" == android-* ]]; then
   echo '{ global: sbe_get; local: *; };' > "$TC/exports.map"
   "$TC/c++" -std=c++20 -Os -fPIC $FL -shared -I"$SRC/include" -I"$ROOT/src" "$ROOT/tools/engine/sbengine.cpp" \
-    "$B/libnuvio_engine.a" "$LT" -Wl,--gc-sections -Wl,--version-script="$TC/exports.map" -Wl,--strip-all -Wl,-soname,libsbengine.so -lpthread -o "$OUT"
+    "$B/libnuvio_engine.a" "$LT" -Wl,--gc-sections -Wl,--version-script="$TC/exports.map" -Wl,--strip-all -Wl,-soname,libsbengine.so $([[ "$TARGET" == android-* ]] && echo "-static-libstdc++ -Wl,-z,max-page-size=16384" || echo -lpthread) -o "$OUT"
 else
   "$TC/c++" -std=c++20 -Os $FL -shared -I"$SRC/include" -I"$ROOT/src" "$ROOT/tools/engine/sbengine.cpp" \
     "$B/libnuvio_engine.a" "$LT" "${SSLLIB[@]}" -framework Security -framework CoreFoundation -framework SystemConfiguration \
