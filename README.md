@@ -33,7 +33,7 @@
 ## Install
 For LG TVs running webOS 3 and later (ARM). It should work on all of them, but it has only been tested on webOS 4.4. [Compatibility](docs/compatibility.md)
 
-- With the Homebrew Channel: add the repository `https://better-stremio.github.io/webos/apps.json`,
+- With the Homebrew Channel: add the repository `https://betterstremio.github.io/webos/apps.json`,
   then install Stremio Origin.
 - Or download the `.ipk` from Releases and install it on a TV in Developer Mode.
 
@@ -43,7 +43,7 @@ For LG TVs running webOS 3 and later (ARM). It should work on all of them, but i
 - Logs stay on the TV. Sharing them is your choice: the app seals them and shows a short code.
 
 ## Support
-- Issues: https://github.com/better-stremio/webos/issues
+- Issues: https://github.com/betterstremio/webos/issues
 - Support: https://ko-fi.com/blueee123
 
 ## Credits

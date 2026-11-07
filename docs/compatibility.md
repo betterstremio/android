@@ -8,5 +8,5 @@
 | 22 to 25 | Should work, not tested yet |
 
 ## Install
-- Homebrew Channel: add the repository `https://better-stremio.github.io/webos/apps.json`, then install Stremio Origin.
+- Homebrew Channel: add the repository `https://betterstremio.github.io/webos/apps.json`, then install Stremio Origin.
 - Developer Mode: install the `.ipk` from Releases (not tested yet).
