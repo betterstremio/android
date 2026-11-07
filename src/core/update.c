@@ -35,7 +35,11 @@
 #endif
 #define PKG_KIND_LEN (sizeof PKG_KIND - 1)
 
+#ifdef __ANDROID__
+#define UPD_GH "https://api.github.com/repos/betterstremio/android/releases?per_page=8"   /* the Android build's own releases */
+#else
 #define UPD_GH "https://api.github.com/repos/betterstremio/webos/releases?per_page=8"
+#endif
 #define UPD_MAN "https://betterstremio.github.io/webos/api/apps/" SB_APP_ID "/manifest.json"
 typedef struct { char ver[24], url[512], sha[72]; char notes[5][256]; int nnotes; } Rel;
 static struct {
