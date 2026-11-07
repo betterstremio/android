@@ -7,4 +7,9 @@ Third-party code in this app and its licences:
 - SHA-256 and AES (third_party/crypto): Brad Conte's crypto-algorithms, public domain (crypto-algorithms-public-domain.txt).
 - P-256 key exchange (third_party/crypto/uecc): micro-ecc by Kenneth MacKay, BSD-2-Clause (micro-ecc-BSD-2-Clause.txt).
 - FreeType, HarfBuzz, FriBidi, libass (ISC, 0.17.5), cJSON, stb, qrcodegen, libwebp, SDL2: their licences ship with their sources in third_party/.
+The Android build adds (tools/android/build-deps.sh fetches and pins them; they are not in third_party/):
+- SDL 2.30.9 (zlib, sdl2-zlib.txt): libSDL2.so and its Java activity.
+- curl 8.11.0 (curl licence, MIT-style, curl-MIT-like.txt): libcurl.so.
+- Mbed TLS 3.6.2 (Apache-2.0, mbedtls-Apache-2.0.txt): inside libcurl.so.
+- AndroidX Media3 1.5.0 / ExoPlayer and AndroidX Annotation (Apache-2.0, the same text as mbedtls-Apache-2.0.txt): the video player.
 The app itself is GPL-3.0.
