@@ -300,6 +300,7 @@ int main(int argc, char **argv) {
       if (frame == bundleAt) { extern char *applog_bundle(void); char *bb = applog_bundle(); FILE *bf = fopen(getenv("SB_BUNDLE_OUT"), "w"); if (bf && bb) fputs(bb, bf); if (bf) fclose(bf); free(bb); } }
     p2p_test_tick(frame); /* development: SB_P2PTEST / SB_P2PCYCLES */
     if (frame == 90 && getenv("SB_PLAY_FROM")) play_from_addon(); /* development: the first stream an addon gives, as its row would play it */
+    if (frame == 90 && getenv("SB_OPEN")) app_open_external(getenv("SB_OPEN"), ""); /* development: a title's page, SB_OPEN=stremio:///detail/movie/tt1228705 */
     if (frame == 90 && getenv("SB_PLAY")) { Stream st; memset(&st, 0, sizeof st); snprintf(st.url, sizeof st.url, "%s", getenv("SB_PLAY")); snprintf(st.name, sizeof st.name, "Dev\n1080p"); snprintf(st.title, sizeof st.title, "%s", getenv("SB_PLAY_TITLE") ? getenv("SB_PLAY_TITLE") : "Development stream HDR10 DDP 5.1"); snprintf(st.addon, sizeof st.addon, "Torrentio"); app_play(&st, getenv("SB_PLAY_TYPE") ? getenv("SB_PLAY_TYPE") : "movie", getenv("SB_PLAY_ID") ? getenv("SB_PLAY_ID") : "tt27369017", getenv("SB_PLAY_VID") ? getenv("SB_PLAY_VID") : "", 0); } /* development: play a stream straight away */
     Uint32 tCpu0 = SDL_GetTicks();
     text_frame_begin();

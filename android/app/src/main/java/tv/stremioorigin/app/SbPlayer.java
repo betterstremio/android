@@ -55,7 +55,7 @@ public final class SbPlayer {
     static int flags;                 // 1 tracks changed, 2 error changed, 4 HDR changed
     static String err = "", hdr = "", audioList = "", textList = "";
     // on the main thread
-    static boolean everReady, firstFrame, seeking, hasError;
+    static boolean everReady, firstFrame, seeking, hasError, audioOff;   // audioOff: the sound was switched off because it can't be played here
     static int vw, vh; static float fps;
     static float[] win = { 0, 0, 1, 1 }; static float[] crop;    // crop: src x,y,w,h (of the frame), dst x,y,w,h (of the box)
     static final List<int[]> audioMap = new ArrayList<>(), textMap = new ArrayList<>();   // our index -> { group, track }
@@ -95,6 +95,14 @@ public final class SbPlayer {
             @Override public void onVideoSizeChanged(@NonNull VideoSize v) { vw = v.width; vh = v.height; place(); refresh(); }
             @Override public void onTracksChanged(@NonNull Tracks t) { tracksChanged(t); }
             @Override public void onPlayerError(@NonNull PlaybackException e) {
+                // the sound alone can't be played (a codec this device lacks): the picture goes on without it, as the TV's own
+                // player does; the app sees "audio unsupported" and offers what it can (another track, another stream)
+                String all = String.valueOf(e.getMessage()) + " " + (e.getCause() != null ? e.getCause().toString() : "");
+                if (!audioOff && player != null && (all.contains("AudioRenderer") || e.errorCode == PlaybackException.ERROR_CODE_AUDIO_TRACK_INIT_FAILED || e.errorCode == PlaybackException.ERROR_CODE_AUDIO_TRACK_WRITE_FAILED)) {
+                    Log.w(TAG, "player: the sound can't be played here (" + e.getErrorCodeName() + "): the picture goes on without it");
+                    audioOff = true; long pos = player.getCurrentPosition();
+                    player.setTrackSelectionParameters(player.getTrackSelectionParameters().buildUpon().setTrackTypeDisabled(C.TRACK_TYPE_AUDIO, true).build());
+                    player.seekTo(pos); player.prepare(); player.play(); refresh(); return; }
                 hasError = true; String m = e.getErrorCodeName() + (e.getMessage() != null ? ": " + e.getMessage() : "");
                 Throwable c = e.getCause(); if (c != null && c.getMessage() != null) m += " (" + c.getMessage() + ")";
                 Log.w(TAG, "player error " + m); synchronized (SbPlayer.class) { err = m; flags |= 2; } refresh(); }
@@ -111,7 +119,7 @@ public final class SbPlayer {
     public static void load(String url, double startSec) {
         ui.post(() -> {
             if (player == null) player = make();
-            everReady = firstFrame = seeking = hasError = false; vw = vh = 0; fps = 0; textSel = -1;
+            everReady = firstFrame = seeking = hasError = audioOff = false; vw = vh = 0; fps = 0; textSel = -1;
             clip.setVisibility(View.INVISIBLE); subs.setCues(new ArrayList<>());
             synchronized (SbPlayer.class) { err = ""; hdr = ""; audioList = ""; textList = ""; flags |= 7; }
             audioMap.clear(); textMap.clear();
@@ -120,7 +128,7 @@ public final class SbPlayer {
             if (lu.contains(".m3u8") || lu.contains("/hls/") || lu.contains("format=m3u8")) mb.setMimeType(MimeTypes.APPLICATION_M3U8);
             else if (lu.contains(".mpd")) mb.setMimeType(MimeTypes.APPLICATION_MPD);
             player.setTrackSelectionParameters(player.getTrackSelectionParameters().buildUpon().clearOverrides()
-                .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, true).build());
+                .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, true).setTrackTypeDisabled(C.TRACK_TYPE_AUDIO, false).build());
             player.setMediaItem(mb.build(), startSec > 0 ? (long) (startSec * 1000) : C.TIME_UNSET);
             player.setVolume(1f);
             player.prepare(); player.setPlayWhenReady(true);
@@ -143,7 +151,7 @@ public final class SbPlayer {
     public static void setWindow(float x, float y, float w, float h) { ui.post(() -> { win = new float[] { x, y, w, h }; crop = null; place(); }); }
     public static boolean setCrop(float sx, float sy, float sw, float sh, float dx, float dy, float dw, float dh) {
         ui.post(() -> { crop = new float[] { sx, sy, sw, sh, dx, dy, dw, dh }; place(); }); return true; }
-    public static void selectAudio(int idx) { ui.post(() -> select(C.TRACK_TYPE_AUDIO, audioMap, idx)); }
+    public static void selectAudio(int idx) { ui.post(() -> { audioOff = false; select(C.TRACK_TYPE_AUDIO, audioMap, idx); }); }   // another track chosen: tried again
     public static void selectText(int idx) { ui.post(() -> { textSel = idx; if (idx < 0) { if (player != null) player.setTrackSelectionParameters(player.getTrackSelectionParameters().buildUpon().setTrackTypeDisabled(C.TRACK_TYPE_TEXT, true).build()); subs.setCues(new ArrayList<>()); } else select(C.TRACK_TYPE_TEXT, textMap, idx); }); }
     public static String tracks(int kind) { synchronized (SbPlayer.class) { return kind == 0 ? audioList : textList; } }
     public static String error() { synchronized (SbPlayer.class) { return err; } }
@@ -177,7 +185,7 @@ public final class SbPlayer {
                 if (g.getType() != C.TRACK_TYPE_AUDIO) continue;
                 for (int i = 0; i < g.length; i++) { anyAudio = true;
                     if (g.isTrackSelected(i)) { audioCur = ai; audioOn = true; audioOk = g.isTrackSupported(i); } ai++; } }
-            if (everReady && anyAudio && (!audioOn || !audioOk)) audioBad = 1;
+            if ((everReady && anyAudio && (!audioOn || !audioOk)) || audioOff) audioBad = 1;
         }
         synchronized (SbPlayer.class) {
             snap[0] = st; snap[1] = t; snap[2] = dur; snap[3] = buf; snap[4] = vw; snap[5] = vh; snap[6] = fps;

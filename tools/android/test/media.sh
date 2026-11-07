@@ -19,6 +19,9 @@ if [ ! -f clip.mkv ]; then
     -metadata:s:a:0 language=eng -metadata:s:a:0 title=English -metadata:s:a:1 language=fre -metadata:s:a:1 title="French 5.1" \
     -metadata:s:s:0 language=eng -metadata:s:s:0 title=English clip.mkv
 fi
+if [ ! -f clip-eac3.mkv ]; then   # the sound only as E-AC-3 (Dolby Digital Plus), which some Android devices (and the emulator) can't decode
+  ffmpeg -loglevel error -y -i clip.mp4 -map 0:v -map 0:a -c:v copy -c:a eac3 -b:a 256k clip-eac3.mkv
+fi
 if [ ! -f hls/master.m3u8 ]; then
   mkdir -p hls; ffmpeg -loglevel error -y -i clip.mp4 -c copy -f hls -hls_time 4 -hls_playlist_type vod -hls_segment_filename 'hls/seg%03d.ts' hls/master.m3u8
 fi

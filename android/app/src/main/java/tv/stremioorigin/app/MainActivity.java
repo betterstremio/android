@@ -161,7 +161,7 @@ public class MainActivity extends SDLActivity {
     /* what the screen and the decoders take, as the C side's SB_TVCAPS ("maxRes=2160,hdr=1,dv=0,av1=1,dts=0,truehd=0") */
     static class Caps {
         static String describe(MainActivity a) {
-            int maxRes = 1080, hdr = 0, dv = 0, av1 = 0, dts = 0, truehd = 0;
+            int maxRes = 1080, hdr = 0, dv = 0, av1 = 0, dts = 0, truehd = 0, ac3 = 0, eac3 = 0;
             try {
                 Display d = a.getWindowManager().getDefaultDisplay();
                 for (Display.Mode m : d.getSupportedModes()) if (Math.min(m.getPhysicalWidth(), m.getPhysicalHeight()) >= 2160) maxRes = 2160;
@@ -169,19 +169,27 @@ public class MainActivity extends SDLActivity {
                 if (hc != null) for (int t : hc.getSupportedHdrTypes()) {
                     if (t == Display.HdrCapabilities.HDR_TYPE_HDR10) hdr = 1;
                     if (t == Display.HdrCapabilities.HDR_TYPE_DOLBY_VISION) dv = 1; }
+                boolean dec4k = false;   // 4K counts only when a decoder takes it too (some boxes put out 4K but decode 1080p only)
                 for (MediaCodecInfo ci : new MediaCodecList(MediaCodecList.REGULAR_CODECS).getCodecInfos()) {
                     if (ci.isEncoder()) continue;
+                    for (String t : ci.getSupportedTypes()) if (t.equalsIgnoreCase("video/hevc") || t.equalsIgnoreCase("video/avc")) {
+                        try { MediaCodecInfo.VideoCapabilities vc = ci.getCapabilitiesForType(t).getVideoCapabilities(); if (vc != null && vc.isSizeSupported(3840, 2160)) dec4k = true; } catch (Exception ignored) {} }
                     boolean hw = Build.VERSION.SDK_INT >= 29 ? ci.isHardwareAccelerated() : !(ci.getName().startsWith("OMX.google") || ci.getName().startsWith("c2.android"));
                     for (String t : ci.getSupportedTypes()) {
                         if (t.equalsIgnoreCase("video/av01") && hw) av1 = 1;
                         if (t.equalsIgnoreCase("audio/vnd.dts") || t.equalsIgnoreCase("audio/vnd.dts.hd")) dts = 1;
                         if (t.equalsIgnoreCase("audio/true-hd")) truehd = 1;
+                        if (t.equalsIgnoreCase("audio/ac3")) ac3 = 1;
+                        if (t.equalsIgnoreCase("audio/eac3") || t.equalsIgnoreCase("audio/eac3-joc")) eac3 = 1;
                         if (t.equalsIgnoreCase("video/dolby-vision") && dv == 0 && hdr == 1) dv = 1; } }
+                if (maxRes == 2160 && !dec4k) { maxRes = 1080; Log.i(TAG, "the screen takes 4K, no decoder does: 1080p"); }
                 androidx.media3.exoplayer.audio.AudioCapabilities ac = androidx.media3.exoplayer.audio.AudioCapabilities.getCapabilities(a);
                 if (ac.supportsEncoding(androidx.media3.common.C.ENCODING_DTS)) dts = 1;
                 if (ac.supportsEncoding(androidx.media3.common.C.ENCODING_DOLBY_TRUEHD)) truehd = 1;
-            } catch (Throwable t) { Log.w(TAG, "caps", t); }
-            String s = "maxRes=" + maxRes + ",hdr=" + hdr + ",dv=" + dv + ",av1=" + av1 + ",dts=" + dts + ",truehd=" + truehd;
+                if (ac.supportsEncoding(androidx.media3.common.C.ENCODING_AC3)) ac3 = 1;           // passed to a receiver or the TV over HDMI
+                if (ac.supportsEncoding(androidx.media3.common.C.ENCODING_E_AC3) || ac.supportsEncoding(androidx.media3.common.C.ENCODING_E_AC3_JOC)) eac3 = 1;
+            } catch (Throwable t) { Log.w(TAG, "caps", t); ac3 = eac3 = 1; }   // (unknown: as a TV)
+            String s = "maxRes=" + maxRes + ",hdr=" + hdr + ",dv=" + dv + ",av1=" + av1 + ",dts=" + dts + ",truehd=" + truehd + ",ac3=" + ac3 + ",eac3=" + eac3;
             Log.i(TAG, "device caps " + s);
             return s;
         }

@@ -213,9 +213,10 @@ static int rate(const Stream *s, const TvCaps *c, double mbps, double dur, BestR
   if (hd[0]) sc += c->hdr ? 12 : -10;
   int dv = has_word(l, "dv") || has_word(l, "dovi") || has_word(l, "dolby vision"); if (dv) sc += c->dv ? 20 : (strstr(l, "hdr") ? -5 : -30); /* the TV's own Dolby Vision first; without it the HDR base plays */
   int dm = best_dts_mode(), dts = dm != 2 && strstr(au, "DTS") != NULL, thd = strstr(au, "TrueHD") != NULL, cdts = dm == 1 ? 0 : c->dts; /* DTS: Off, neither favoured nor avoided; Convert, it will be; Auto, what was found out */
-  int mute = ((dts && !cdts && dm != 1) || (thd && !c->truehd)) && !other_audio(l); /* nothing else named: the sound is the one this TV can't decode (DTS set to Convert: it will be) */
+  int dd = !dts && !thd && ((!strcmp(a0, "EAC3") && c->noeac3) || (!strcmp(a0, "AC3") && c->noac3)); /* Dolby Digital (Plus) on a device without it (some Android ones) */
+  int mute = ((dts && !cdts && dm != 1) || (thd && !c->truehd) || dd) && !other_audio(l); /* nothing else named: the sound is the one this TV can't decode (DTS set to Convert: it will be) */
   if ((dts && cdts) || (thd && c->truehd)) sc += 16; /* the TV decodes the special track: the best sound it can give */
-  else if (dts || thd) sc -= 45;                       /* the file's other tracks have to stand in */
+  else if (dts || thd || dd) sc -= 45;                 /* the file's other tracks have to stand in */
   else if (!strcmp(a0, "EAC3")) sc += 14; else if (!strcmp(a0, "AC3")) sc += 12; else if (!strcmp(a0, "AAC")) sc += 8; else if (!strcmp(a0, "Opus") || !strcmp(a0, "FLAC")) sc -= 15;
   if (strstr(au, "Atmos")) sc += 6;
   if (has_word(l, "av1") && !c->av1) sc -= 200; /* nothing to fall back to: the picture won't decode */
@@ -269,7 +270,16 @@ const Stream *best_pick(const Stream *const *list, int n, double durMin, const T
 int best_dts_mode(void) { return 0; } /* the scoring test: Auto, as the web app scores */
 #endif
 #ifndef SB_BEST_PURE
+#ifdef __ANDROID__
+/* Android: on until switched off. The first time, the line is measured quietly in the background (as switching it on
+   in Settings does); until then the choice assumes a fast line */
+static void on_default_speed(int ok, double mbps, void *ud) { (void)mbps; (void)ud; if (ok && !*store_get("autoBest", "")) store_set("autoBest", "true"); }
+int best_on(void) {
+  if (!*store_get("autoBest", "")) { static int asked; if (!asked && !best_speed_busy()) { asked = 1; best_caps_probe(NULL, NULL); best_speed_run(on_default_speed, NULL); } return 1; }
+  return !strcmp(store_get("autoBest", "false"), "true"); }
+#else
 int best_on(void) { return !strcmp(store_get("autoBest", "false"), "true"); }
+#endif
 int best_dur(const cJSON *meta, const char *type) {
   const cJSON *rt = meta ? cJSON_GetObjectItemCaseSensitive(meta, "runtime") : NULL; char b[64] = "";
   if (cJSON_IsString(rt) && rt->valuestring) snprintf(b, sizeof b, "%s", rt->valuestring); else if (cJSON_IsNumber(rt)) snprintf(b, sizeof b, "%g", rt->valuedouble);
@@ -285,6 +295,18 @@ static TvCaps caps; static int capsKnown = -1, capsAsking;
 typedef struct { void (*cb)(const TvCaps *, void *); void *ud; } CapsWait;
 static CapsWait capsWaits[8]; static int nCapsWaits;
 const TvCaps *best_caps(void) {
+#ifdef __ANDROID__
+  /* Android: the display's and decoders' answer is ready at start (MainActivity hands it over as SB_TVCAPS), so the caps
+     are known before any choice or resume, as the kept caps are on a TV */
+  if (capsKnown <= 0 && getenv("SB_TVCAPS")) { const char *ov = getenv("SB_TVCAPS"), *p; int x; TvCaps c = { 1080, 0, 0, 0, 0, 0 };
+    if ((p = strstr(ov, "maxRes=")) && sscanf(p + 7, "%d", &x) == 1) c.maxRes = x; if ((p = strstr(ov, "hdr=")) && sscanf(p + 4, "%d", &x) == 1) c.hdr = x;
+    if ((p = strstr(ov, "dv=")) && sscanf(p + 3, "%d", &x) == 1) c.dv = x; if ((p = strstr(ov, "av1=")) && sscanf(p + 4, "%d", &x) == 1) c.av1 = x;
+    if ((p = strstr(ov, "dts=")) && sscanf(p + 4, "%d", &x) == 1) c.dts = x; if ((p = strstr(ov, "truehd=")) && sscanf(p + 7, "%d", &x) == 1) c.truehd = x;
+    if ((p = strstr(ov, ",ac3=")) && sscanf(p + 5, "%d", &x) == 1) c.noac3 = !x; if ((p = strstr(ov, "eac3=")) && sscanf(p + 5, "%d", &x) == 1) c.noeac3 = !x;
+    if (best_learned("dts") >= 0) c.dts = best_learned("dts");
+    caps = c; capsKnown = 1;
+    fprintf(stderr, "[best] device: %dp, HDR %d, Dolby Vision %d, AV1 %d, DTS %d, TrueHD %d, AC3 %d, EAC3 %d\n", c.maxRes, c.hdr, c.dv, c.av1, c.dts, c.truehd, !c.noac3, !c.noeac3); }
+#endif
   if (capsKnown < 0) { const cJSON *n = store_node("tvCaps2"); capsKnown = 0;
     if (cJSON_IsObject(n) && cJSON_GetObjectItemCaseSensitive(n, "maxRes")) { caps.maxRes = (int)js_num(n, "maxRes", 1080); caps.hdr = js_bool(n, "hdr", 0); caps.dv = js_bool(n, "dv", 0); caps.av1 = js_bool(n, "av1", 0); caps.truehd = js_bool(n, "truehd", 0); capsKnown = 1;
       caps.dts = best_learned("dts") == 1 || (best_learned("dts") < 0 && js_bool(n, "dtsCfg", 0)); } } /* the old "dts" (a guess from the webOS release) no longer counts */ /* the old "dts" (a guess from the webOS release) no longer counts */

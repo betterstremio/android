@@ -205,6 +205,19 @@ def t_mkv():
 @test('play-hls')
 def t_hls(): return play_test('play-hls', 'http://%s:%d/media/hls/master.m3u8' % (HOST, PORT))
 
+@test('audio-fallback')
+def t_audio():   # a sound the device can't decode: the picture plays on without it (the emulator has no E-AC-3 decoder)
+    caps = log(); launch_caps = [l for l in caps.splitlines() if 'device caps' in l]
+    ok, d = play_test('audio-fallback', 'http://%s:%d/media/clip-eac3.mkv' % (HOST, PORT))
+    L = log()
+    if 'eac3=1' in L: return None, 'this device decodes E-AC-3: nothing to fall back from'
+    if not ok: return False, d
+    # either ExoPlayer leaves the track out (no decoder listed) or its decoder fails and the bridge turns the sound off:
+    # both end in the app's own "can't play this sound" notice with the picture on
+    how = 'decoder failed, sound switched off' if "the sound can't be played here" in L else 'track left out'
+    if "can’t play this video’s sound" not in L and "can't play this video's sound" not in L: return False, 'played, but the app was never told the sound is missing: ' + d
+    return True, 'E-AC-3 only, no decoder (%s): the picture plays on and the app says so; %s' % (how, d)
+
 @test('seek-pause')
 def t_seek():
     ok, d = play_test('seek-before', 'http://%s:%d/media/clip.mp4' % (HOST, PORT))

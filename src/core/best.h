@@ -7,7 +7,7 @@
 #include "core/stremio.h"
 
 /* ---- what the TV can show and decode ---- */
-typedef struct { int maxRes, hdr, dv, av1, dts, truehd; } TvCaps;   /* dts: 1 only once this TV was seen playing DTS */
+typedef struct { int maxRes, hdr, dv, av1, dts, truehd, noac3, noeac3; } TvCaps;   /* noac3/noeac3: the device can't play Dolby Digital (Plus); 0 on every TV, some Android phones and boxes */   /* dts: 1 only once this TV was seen playing DTS */
 const TvCaps *best_caps(void);         /* the kept answer, or NULL when never asked */
 /* what playback taught about this TV, kept for good in tvCaps2: "dts" (its decoder plays DTS: an error 200 on a
    DTS track says no, a DTS track playing 3 s without one says yes), "hlsHevcOk" (HEVC inside the local HLS

@@ -5,6 +5,7 @@
 #include "core/json.h"
 #include "core/i18n.h"
 #include "core/addons.h"
+#include "core/best.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -738,6 +739,9 @@ int sb_resume_stream(const char *id, const char *vid, Stream *out) {
   copy_str(out->title, sizeof out->title, js_str(s, "title", "")); out->p2p = !strncmp(out->url, "p2p://", 6);
   copy_str(out->hdrs, sizeof out->hdrs, js_str(s, "hdrs", "")); copy_str(out->rhdrs, sizeof out->rhdrs, js_str(s, "rhdrs", "")); copy_str(out->binge, sizeof out->binge, js_str(s, "binge", ""));
   copy_str(out->filename, sizeof out->filename, js_str(s, "filename", "")); copy_str(out->hash, sizeof out->hash, js_str(s, "hash", "")); out->size = js_num(s, "size", 0);
+  /* a stream this device can't play (a 4K or AV1 file remembered from a choice made by hand, a device that changed) is
+     not resumed: the best stream for this device is chosen instead */
+  { const TvCaps *c = best_caps(); if (out->url[0] && c && !best_rate(out, c, -1, 100, NULL)) { fprintf(stderr, "[resume] %s: the remembered stream does not suit this device (%dp max): choosing again\n", k, c->maxRes); return 0; } }
   return out->url[0] != 0;
 }
 void sb_remember_stream(const char *id, const char *vid, const Stream *s) {
