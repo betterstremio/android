@@ -8,9 +8,9 @@
 
 <p align="center">A native app for Stremio addons, written in C, for LG webOS TVs, Android TV, Google TV, Fire TV and phones.<br>It appears on your device as Stremio Origin.</p>
 
-<p align="center"><a href="https://github.com/betterstremio/webos/releases">webOS releases</a> · <a href="https://github.com/betterstremio/android/releases">Android releases</a></p>
+<p align="center"><a href="https://github.com/betterstremio/webos/releases">webOS releases</a> · <a href="https://github.com/betterstremio/android/releases">Android releases</a> · <a href="https://betterstremio.github.io/">Website</a></p>
 
-<p align="center"><a href="docs/brag.mp4"><img src="docs/brag.jpg" width="720" alt="Watch the Better Stremio video"></a><br><a href="docs/brag.mp4">▶ Watch the video (75 s)</a></p>
+<p align="center"><a href="docs/brag.mp4"><img src="docs/brag.jpg" width="720" alt="Watch the Better Stremio video"></a><br><a href="docs/brag.mp4">▶ Watch the video (78 s)</a></p>
 
 <p align="center"><em>Stremio™ is a trademark of its owner. This project is independent and unofficial, and is not affiliated with, endorsed by or sponsored by Stremio. The name only describes compatibility.</em></p>
 
