@@ -108,6 +108,7 @@ static int col_last(const Row *r) { return r->ntiles ? r->ntiles - 1 : r->items.
 static const ColFolder *tile_cur(const Board *b) { if (b->rowIdx < 0 || b->rowIdx >= b->n) return NULL; const Row *r = &b->rows[b->rowIdx]; return r->ntiles && r->col < r->ntiles ? &r->tiles[r->col] : NULL; }
 static void see_all_open(const Row *r) { CatParams p; memset(&p, 0, sizeof p); p.def = r->def; snprintf(p.title, sizeof p.title, "%s", T(r->title)); app_go(SCR_CAT, &p, 0); }
 static const Item *focused_of(Board *b) { if (spotOn(b) && b->nfeat) return &b->feat[b->featIdx % b->nfeat]; if (b->rowIdx < 0 || b->rowIdx >= b->n) return NULL; Row *r = &b->rows[b->rowIdx]; return r->col < r->items.n ? &r->items.items[r->col] : NULL; }
+const Item *board_next_item(void) { Board *b = cur(); if (!b || spotOn(b) || topNav.active || b->rowIdx >= b->n) return NULL; Row *r = &b->rows[b->rowIdx]; return r->col + 1 < r->items.n ? &r->items.items[r->col + 1] : NULL; }
 int board_spot_up(void) { Board *b = cur(); return b && b->kind == 1 && b->featOn && !topNav.active; }
 
 /* ---- rows ---- */

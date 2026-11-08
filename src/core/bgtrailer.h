@@ -22,6 +22,7 @@ typedef struct {
   int   blocked;        /* the top bar, a sheet or menu, the player or the splash is up */
   int   spotlight;      /* Discover's spotlight is showing: it moves on by itself */
   int   shedding;       /* frames run late (the pace stepped down): no trailer for now */
+  const Item *next;     /* the card to the right of the focus (a clip's link is made ready ahead), NULL when none */
 } BgtView;
 
 typedef struct {

@@ -14,6 +14,9 @@ unsigned net_get(const char *url, NetCb cb, void *ud);
 /* a file's size from one 1-byte range request (body = the byte count as text, status 0 when unknown); the body is never read */
 unsigned net_file(const char *path, NetCb cb, void *ud);  /* a local file read (and JSON parsed) off the drawing thread: 200 or 404 */
 unsigned net_size(const char *url, NetCb cb, void *ud);
+/* a link's final address: its redirects followed with a 1-byte request (a debrid link is made on its first request:
+   asked ahead, the player then gets an address that answers at once); body = that address, status = its answer */
+unsigned net_resolve(const char *url, NetCb cb, void *ud);
 unsigned net_get_hdr(const char *url, const char *extraHeader, NetCb cb, void *ud);  /* several: one per line */
 unsigned net_post_json(const char *url, const char *json, NetCb cb, void *ud);
 /* a POST with its own headers: one "Name: value" per line ("\n" between them); a User-Agent among them

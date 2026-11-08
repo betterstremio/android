@@ -47,7 +47,8 @@ static int resolve(void) {
 typedef struct Req {
   unsigned id; char *url, *hdr, *post, *ctype, *method; size_t postLen; NetCb cb; void *ud; long timeoutMs; cJSON *json; /* postLen: a raw body (net_send), else post is text; json: the body already parsed on the worker */
   int status; unsigned char *body; size_t len, cap; int cancelled, done;
-  int size; double total;  /* net_size: only the headers are read */
+  int size; double total;  /* net_size: only the headers are read (2: net_resolve, the final address kept) */
+  char *eff;
   int file;                /* net_file: url is a local path */
   struct Req *next;
 } Req;
@@ -94,7 +95,8 @@ static void perform(Req *r) {
   CURLcode rc = f_easy_perform(c);
   long code = 0; f_easy_getinfo(c, CURLINFO_RESPONSE_CODE, &code);
   r->status = rc == CURLE_OK ? (int)code : 0;
-  if (r->size) { char t[32]; int k = snprintf(t, sizeof t, "%.0f", r->total > 0 ? r->total : 0); free(r->body); r->body = (unsigned char *)strdup(t); r->len = (size_t)k; r->status = (int)code; } /* the server's answer even without a size (a 404 says why a film will not play); 0 = no answer */
+  if (r->size == 2) { char *e = NULL; f_easy_getinfo(c, CURLINFO_EFFECTIVE_URL, &e); free(r->body); r->body = (unsigned char *)strdup(e ? e : ""); r->len = strlen((char *)r->body); r->status = (int)code; }
+  else if (r->size) { char t[32]; int k = snprintf(t, sizeof t, "%.0f", r->total > 0 ? r->total : 0); free(r->body); r->body = (unsigned char *)strdup(t); r->len = (size_t)k; r->status = (int)code; } /* the server's answer even without a size (a 404 says why a film will not play); 0 = no answer */
   if (hs) f_slist_free_all(hs);
   f_easy_cleanup(c);
 }
@@ -200,6 +202,7 @@ unsigned net_get_timeout(const char *url, int timeoutMs, NetCb cb, void *ud) { r
 unsigned net_get(const char *url, NetCb cb, void *ud) { return enqueue(url, NULL, NULL, cb, ud); }
 unsigned net_get_hdr(const char *url, const char *hdr, NetCb cb, void *ud) { return enqueue(url, hdr, NULL, cb, ud); }
 unsigned net_size(const char *url, NetCb cb, void *ud) { return enqueue_x(url, NULL, NULL, NULL, 10000, 1, cb, ud); }
+unsigned net_resolve(const char *url, NetCb cb, void *ud) { return enqueue_x(url, NULL, NULL, NULL, 10000, 2, cb, ud); }
 unsigned net_post_json(const char *url, const char *json, NetCb cb, void *ud) { return enqueue(url, NULL, json, cb, ud); }
 unsigned net_post_hdr_t(const char *url, const char *body, const char *contentType, const char *headers, int timeoutMs, NetCb cb, void *ud) {
   return enqueue_c(url, headers, body ? body : "", contentType ? contentType : "", timeoutMs, cb, ud);

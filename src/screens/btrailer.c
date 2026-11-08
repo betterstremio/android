@@ -51,6 +51,7 @@ void btr_tick(float dt) {
   if (cardScr && !topNav.active && screens[SCR] && screens[SCR]->focused) f = screens[SCR]->focused();
   BgtView v = { app_trailer_idle(), cardScr, f, topNav.active || app_overlay != NULL || /* (a sheet or the long-press menu: it gives way, softly, and none starts under it) */ player_open() || !app_splash_done || saver_on(),
                 board_spot_up(), pace_period() > 21.5 };
+  v.next = cardScr ? board_next_item() : NULL;
   bgt_tick(&v);
   if (B.own && !player_open()) {
     video_pump();
