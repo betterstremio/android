@@ -59,7 +59,7 @@ static const Opt SS_OPTS[] = { { "0", "Off" }, { "1", "1 min" }, { "2", "2 min" 
 static const Opt ACCENT_OPTS[] = { { "logo", "From the logo" }, { "adaptive", "From the artwork" }, { "purple", "Purple" }, { "violet", "Violet" }, { "fuchsia", "Fuchsia" }, { "pink", "Pink" }, { "rose", "Rose" }, { "red", "Red" }, { "orange", "Orange" }, { "amber", "Amber" }, { "gold", "Gold" }, { "lime", "Lime" }, { "green", "Green" }, { "emerald", "Emerald" }, { "teal", "Teal" }, { "cyan", "Cyan" }, { "sky", "Sky" }, { "blue", "Blue" }, { "indigo", "Indigo" }, { "graphite", "Graphite" } };
 #define NCAT 10
 #define MAXROWS 48
-static Setting recsS[8];
+static Setting recsS[10];
 static Setting playBase[8], playS[8], subsS[6], audS[5], lookS[2], langS[2], keyS[5], addonS[40], acctS[1], supS[6];
 static Cat cats[NCAT]; static int ncat; /* (Keys leaves when this build carries every key) */
 
@@ -117,6 +117,7 @@ static int lang_opts(void) {
   return 2;
 }
 /* For You: recommendations on Home (core/recs.c); every row is a store key recs.c and Home watch, so a change applies at once */
+static const Opt PREV[] = { { "clip", "The title itself" }, { "trailer", "Trailer" }, { "off", "Off" } };
 static const Opt HLAY[] = { { "cinematic", "Cinematic" }, { "classic", "Classic" } };
 static const Opt RLANG[] = { { "", "Automatic" }, { "hi,en", "Hindi and English" }, { "en", "English" }, { "hi", "Hindi" }, { "ta,en", "Tamil and English" }, { "te,en", "Telugu and English" },
   { "ml,en", "Malayalam and English" }, { "pa,hi,en", "Punjabi, Hindi and English" }, { "es,en", "Spanish and English" }, { "fr,en", "French and English" }, { "ko,en", "Korean and English" }, { "ja,en", "Japanese and English" } };
@@ -129,6 +130,8 @@ static int recs_opts(void) {
     for (int i = 0; i < recs_region_count() && k < 40; i++) { snprintf(s->dynS[k], 64, "%s", recs_region_code(i)); s->dyn[k].v = s->dynS[k]; s->dyn[k].lb = recs_region_name(recs_region_code(i)); k++; }
     s->opts = s->dyn; s->nopts = k; }
   set_s(&recsS[n++], "recsLangs", "Languages", "Automatic: your region's, plus what you watch a lot", RLANG, (int)(sizeof RLANG / sizeof RLANG[0]), "");
+  set_s(&recsS[n++], "bgPreview", "Preview on focus", "Rest on a card: the title itself, past its opening credits, or its trailer", PREV, 3,
+        strcmp(store_get("bgTrailer", "true"), "false") ? "clip" : "off");
   set_s(&recsS[n++], "recsHideCinema", "Hide films still in cinemas", "Leaves out films out less than 30 days ago", OO, 2, "false");
   set_s(&recsS[n++], "recsPaused", "Pause history", "What you watch from now on is not used for picks", OO, 2, "false");
   set_act(&recsS[n++], "__recsNow", "Refresh picks now", "Ask TMDB again with your latest watching");

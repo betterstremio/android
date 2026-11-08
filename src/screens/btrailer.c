@@ -14,7 +14,7 @@
 #include <stdio.h>
 
 /* own = the decoder holds the trailer (the player takes it over the moment it opens) */
-static struct { int own, live, held, resumes, byKey, quiet, endFade; double pauseAt, resumeAt, steadyAt; } B;
+static struct { int own, live, held, resumes, byKey, quiet, endFade, seekWant; double pauseAt, resumeAt, steadyAt; } B;
 
 /* the trailer in the expanded card (as Nuvio's expanded_card): the plane goes behind the card's rectangle, cover-cropped;
    the board makes the window see-through there. The page itself never gives way */
@@ -30,7 +30,7 @@ static int card_place(void) {
 static void h_load(const char *url, const char *mime, const char *titleId, void *ud) {
   (void)mime; (void)titleId; (void)ud; if (player_open()) return;
   fprintf(stderr, "[trailer] background %s\n", url);
-  video_load(url); B.own = 1; B.live = 0; B.held = 0; B.resumes = 0; B.steadyAt = 0;
+  video_load(url); B.own = 1; B.live = 0; B.held = 0; B.resumes = 0; B.steadyAt = 0; B.seekWant = bgt_clip();
   B.quiet = 1; /* silent until it shows (set once the media is loaded) */
 }
 /* a key: the card shuts at once and the video plays on silent, until the decoder is let go in a pause of the remote.
@@ -58,12 +58,13 @@ void btr_tick(float dt) {
     if (B.quiet && video_has_media()) { B.quiet = 0; video_set_volume(0, 0); } /* (as soon as the media exists: silent until it shows) */
     /* the card opens onto it only once it has been playing steadily for a moment (the plane placed early): the TV says
        "playing" a few frames before the picture is there, which showed as black */
-    if (!B.live && video_live() && vs == VID_PLAYING) { if (!B.steadyAt) { B.steadyAt = now; card_place(); } } else if (!B.live) B.steadyAt = 0;
+    if (B.seekWant && video_duration() > 0) { B.seekWant = 0; double to = bgt_clip_seek(video_duration()); fprintf(stderr, "[btr] clip: from %.0f s\n", to); video_seek(to); B.steadyAt = 0; }
+    if (!B.live && !B.seekWant && !video_settling() && video_live() && vs == VID_PLAYING) { if (!B.steadyAt) { B.steadyAt = now; card_place(); } } else if (!B.live) B.steadyAt = 0;
     if (!B.live && B.steadyAt && now - B.steadyAt > 0.5) { B.steadyAt = 0;
       if (!video_partial_plane()) { fprintf(stderr, "[btr] this TV places the plane full-screen only: no trailer in a card\n"); B.live = 1; bgt_ended(); }
       else if (card_place()) { B.live = 1; /* (the card not open yet: asked again next frame, the video runs on behind the page) */
         if (bgt_state() == BGT_LOAD) { bgt_playing(); CD.on = 1; fprintf(stderr, "[btr] showing %dx%d\n", video_width(), video_height());
-          B.endFade = 0; B.pauseAt = 0; video_set_volume(atoi(store_get("bgTrailerVol", "70")), 1800); /* the sound comes up softly to the chosen level */
+          B.endFade = 0; B.pauseAt = 0; if (!bgt_clip()) video_set_volume(atoi(store_get("bgTrailerVol", "70")), 1800); /* the sound comes up softly to the chosen level */
           tween_set(&CD.a, 0); tween_to(&CD.a, 1, 0.35f, EASE_CSS_EASE); } } else B.steadyAt = now; }
     if (CD.on && now - CD.at < 0.25 && (CD.x != CD.px || CD.y != CD.py || CD.w != CD.pw || CD.h != CD.ph)) card_place(); /* the card moved under it */
     if ((vs == VID_ENDED || vs == VID_ERROR) && (bgt_state() == BGT_LOAD || bgt_state() == BGT_SHOW)) bgt_ended();

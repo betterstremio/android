@@ -1,6 +1,8 @@
 #include "core/bgtrailer.h"
 #include "core/trailer.h"
 #include "core/store.h"
+#include "core/best.h"
+#include "core/stremio.h"
 #include "platform/mem.h"
 #include <stdio.h>
 #include <stdint.h>
@@ -11,6 +13,13 @@
 enum { S_OFF, S_META, S_FIND, S_LOAD, S_SHOW, S_GONE };
 static BgtHooks H; static int st, idleOn; static unsigned gen, tok;
 static double lastCheck, hiddenAt, memAt; static char tid[64], ttype[16];
+/* a clip: the title itself (Settings > For You > Preview on focus), from the one-click chooser, started past the
+   opening credits, silent, 30 s at most; none that starts at once: the trailer instead */
+static int clip; static unsigned btok; static double clipFrac, clipAbs, showAt;
+#define CLIP_SECONDS 30
+static const char *preview_mode(void) { const char *m = store_get("bgPreview", ""); if (m[0]) return m; return strcmp(store_get("bgTrailer", "true"), "false") ? "clip" : "off"; }
+int bgt_clip(void) { return clip; }
+double bgt_clip_seek(double dur) { if (dur <= 0) return 0; double t = clipAbs > 0 ? clipAbs : dur * clipFrac; if (t > dur * 0.5) t = dur * 0.3; return t; }
 static double now_s(void) { struct timespec t; clock_gettime(CLOCK_MONOTONIC, &t); return t.tv_sec + t.tv_nsec / 1e9; }
 
 void bgt_init(const BgtHooks *h) { if (h) H = *h; }
@@ -19,20 +28,20 @@ BgtState bgt_state(void) { static const BgtState m[] = { BGT_OFF, BGT_WAIT, BGT_
 /* a soft stop: paused and hidden in the same frame; the decoder waits for a pause in the navigation (unloading
    the pipeline in the key handler made the next frame late) */
 static void stop_soft(void) {
-  gen++; if (tok) { trailer_cancel(tok); tok = 0; }
+  gen++; if (tok) { trailer_cancel(tok); tok = 0; } if (btok) { best_choose_cancel(btok); btok = 0; }
   if (st == S_LOAD || st == S_SHOW) {
     int was = st == S_SHOW; if (H.hide) H.hide(!was, H.ud);
     st = S_GONE; hiddenAt = now_s() + (was ? 0.46 : 0); /* it was showing: the picture fades back over it first */
   } else if (st == S_META || st == S_FIND) st = S_OFF;
 }
 void bgt_release_now(void) {
-  gen++; if (tok) { trailer_cancel(tok); tok = 0; }
+  gen++; if (tok) { trailer_cancel(tok); tok = 0; } if (btok) { best_choose_cancel(btok); btok = 0; }
   if (st == S_LOAD || st == S_SHOW) { if (H.hide) H.hide(1, H.ud); }
   if (st == S_LOAD || st == S_SHOW || st == S_GONE) { if (H.unload) H.unload(H.ud); }
   st = S_OFF;
 }
 void bgt_key(void) { if (idleOn || st != S_OFF) { if (st == S_LOAD || st == S_SHOW) fprintf(stderr, "[btr] stop: input\n"); idleOn = 0; stop_soft(); } }
-void bgt_playing(void) { if (st == S_LOAD) st = S_SHOW; }
+void bgt_playing(void) { if (st == S_LOAD) { st = S_SHOW; showAt = now_s(); } }
 void bgt_ended(void) { if (st == S_LOAD || st == S_SHOW) { fprintf(stderr, "[btr] stop: the video ended or failed\n"); stop_soft(); } }
 
 static void on_found(const Trailer *t, const char *err, void *ud) {
@@ -49,17 +58,38 @@ static void on_meta(cJSON *m, void *ud) {
   if (!m || !idleOn || (!imdb[0] && !yt[0])) { st = S_OFF; return; }
   st = S_FIND; tok = trailer_find_meta(m, tid, 1, on_found, (void *)(uintptr_t)gen);
 }
+static void on_meta(cJSON *m, void *ud);
+static void clip_status(const char *t, void *ud) { (void)t; (void)ud; }
+static void on_best(const Stream *s, const BestRate *r, void *ud) {
+  (void)r; if ((unsigned)(uintptr_t)ud != gen || st != S_FIND) return; btok = 0;
+  if (!idleOn) { st = S_OFF; return; }
+  if (!s || s->p2p || strncmp(s->url, "http", 4) || s->hdrs[0]) { /* nothing that starts at once (P2P, a proxied link): the trailer */
+    fprintf(stderr, "[btr] clip: no instant link for %s, the trailer instead\n", tid); clip = 0; st = S_META; sb_meta(ttype, tid, on_meta, (void *)(uintptr_t)gen); return; }
+  st = S_LOAD; memAt = now_s() + 10; fprintf(stderr, "[btr] clip %s from %s, %d MB free\n", tid, s->addon, plat_mem_free_mb());
+  if (H.load) H.load(s->url, "", tid, H.ud);
+}
+/* the title itself: a film from 15% in, a series' next episode (S1E1 when not started) 4 minutes in */
+static void clip_start(const Item *it) {
+  char vid[96]; CwInfo ci; int series = !strcmp(it->type, "series");
+  if (series) { if (lib_cw_info(it, &ci) && ci.vid[0] && strcmp(ci.vid, it->id)) snprintf(vid, sizeof vid, "%s", ci.vid); else snprintf(vid, sizeof vid, "%s:1:1", it->id); clipAbs = 240; clipFrac = 0; }
+  else { snprintf(vid, sizeof vid, "%s", it->id); clipAbs = 0; clipFrac = 0.15; }
+  clip = 1; st = S_FIND; btok = best_choose(ttype, vid, series ? 45 : 120, clip_status, on_best, (void *)(uintptr_t)++gen);
+  if (!btok) { clip = 0; st = S_META; sb_meta(ttype, tid, on_meta, (void *)(uintptr_t)gen); }
+}
 static void try_start(const BgtView *v) {
   if (v->shedding) return;   /* the TV is struggling: no trailer for now */
   if (v->spotlight) return;  /* the spotlight moves on by itself */
   if (st != S_OFF || v->blocked || !v->focused || !v->focused->id[0] || !v->focused->type[0]) return;
-  if (!strcmp(store_get("bgTrailer", "true"), "false") || getenv("SB_NOBTR")) return; /* (SB_NOBTR: development, measuring without it) */
+  const char *mode = preview_mode(); if (!strcmp(mode, "off") || getenv("SB_NOBTR")) return; /* (SB_NOBTR: development, measuring without it) */
   snprintf(tid, sizeof tid, "%s", v->focused->id); snprintf(ttype, sizeof ttype, "%s", v->focused->type);
+  if (!strcmp(mode, "clip") && !strncmp(tid, "tt", 2) && (!strcmp(ttype, "movie") || !strcmp(ttype, "series"))) { clip_start(v->focused); return; }
+  clip = 0;
   st = S_META; sb_meta(ttype, tid, on_meta, (void *)(uintptr_t)++gen);
 }
 void bgt_tick(const BgtView *v) {
   double t = now_s();
   if (st == S_GONE && t >= hiddenAt && (v->idle >= 0.7f || t - hiddenAt >= 4)) { st = S_OFF; if (H.unload) H.unload(H.ud); }
+  if (clip && st == S_SHOW && showAt && t - showAt > CLIP_SECONDS) { fprintf(stderr, "[btr] clip: %d s shown, the card goes back\n", CLIP_SECONDS); stop_soft(); }
   if (t - lastCheck < 1) return;
   lastCheck = t;
   int idle = v->idle > 3 && v->browsing && v->focused && !v->blocked;

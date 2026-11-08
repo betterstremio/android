@@ -38,4 +38,6 @@ void bgt_release_now(void);         /* the player is about to load: hidden and u
 void bgt_playing(void);             /* the backend shows its first frame */
 void bgt_ended(void);               /* it ended or failed */
 BgtState bgt_state(void);
+int    bgt_clip(void);              /* what loads is the title itself (not a trailer): silent, started past the credits */
+double bgt_clip_seek(double dur);   /* where a clip starts, once its length is known */
 #endif
