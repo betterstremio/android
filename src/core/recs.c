@@ -126,12 +126,12 @@ static int result_load(long maxAge) {
 /* ---- the run: seeds, then their lists and the Top 10 lists, then ranking, then IMDb ids for what is shown ---- */
 enum { J_FIND, J_REC, J_DISC, J_TOP, J_EXT };
 typedef struct { int kind, seed, lang, series; int tmdb; char tk; char path[600], cache[96]; long maxAge; int state; /* 0 queued, 1 asked, 2 done */ } Job;
-typedef struct { char imdb[24]; char tk; int tmdb; char title[128]; int genres[8], ng; char lang[4]; double w; RecCand rec[RECS_LIST], disc[RECS_LIST]; int nr, nd; } Seed;
+typedef struct { char imdb[24]; char tk; int tmdb; char title[128]; int genres[8], ng; char lang[4]; double w, age; RecCand rec[RECS_LIST], disc[RECS_LIST]; int nr, nd; } Seed;
 static Job jobs[MAX_JOBS]; static int njobs, phase; /* 0 idle, 1 lists, 2 ids */ static unsigned runId;
 static Seed seeds[RECS_MAX_SEEDS]; static int nseeds;
 static RecCand topRaw[2][8][RECS_LIST]; static int topN[2][8]; static char langs[8][4]; static int nlangs;
 static RecCand pick[4][32]; static int npick[4]; static int pickSeed; /* billboard, byw, topM, topS before their IMDb ids */
-static double startAt, libAt; static unsigned libSeen; static int requests;
+static double startAt, libAt; static time_t doneAt; static unsigned libSeen; static int requests;
 
 static cJSON *idmap(void) { cJSON *m = store_node("recsIds"); if (!cJSON_IsObject(m)) { m = cJSON_CreateObject(); store_set_node("recsIds", m); } return m; }
 static int add_job(int kind, const char *path, const char *cache, long maxAge) {
@@ -188,7 +188,7 @@ static void gather_seeds(void) {
     double frac = marked ? 1 : dur > 0 ? off / dur : 0; int eps = series && dur > 0 ? (int)(overall / dur) : 0;
     const char *lw = rjs(s, "lastWatched"); if (!lw[0]) lw = rjs(it, "_mtime"); long d = recs_days(lw); double age = d ? (double)(today - d) : 365;
     double w = recs_seed_weight(age, frac, marked, series, eps); if (w <= 0.001) continue;
-    Seed *x = &all[n++]; memset(x, 0, sizeof *x); snprintf(x->imdb, sizeof x->imdb, "%s", id); x->tk = series ? 't' : 'm'; x->w = w; snprintf(x->title, sizeof x->title, "%s", rjs(it, "name"));
+    Seed *x = &all[n++]; memset(x, 0, sizeof *x); snprintf(x->imdb, sizeof x->imdb, "%s", id); x->tk = series ? 't' : 'm'; x->w = w; x->age = age; snprintf(x->title, sizeof x->title, "%s", rjs(it, "name"));
   }
   qsort(all, (size_t)n, sizeof *all, cmp_seed); nseeds = n < RECS_MAX_SEEDS ? n : RECS_MAX_SEEDS; memcpy(seeds, all, sizeof(Seed) * (size_t)nseeds);
 }
@@ -228,7 +228,9 @@ static void rank_now(void) {
   RecPrefs p; memset(&p, 0, sizeof p); for (int l = 0; l < nlangs; l++) snprintf(p.langs[p.nlangs++], 4, "%s", langs[l]); p.exclude = ex; p.nexclude = nex; p.today = today_days(); p.minMovieAge = recs_hide_cinema() ? 30 : 0;
   RecCand tmp[64]; int n = ns ? recs_rank(rs, ns, &p, tmp, 64) : 0;
   npick[0] = n < 8 ? n : 8; memcpy(pick[0], tmp, sizeof(RecCand) * (size_t)npick[0]);
-  int best = -1; for (int i = 0; i < ns; i++) if (best < 0 || rs[i].w > rs[best].w) best = i;
+  /* because-you-watched: the last thing watched (a series being watched included), as Netflix does */
+  int best = -1; double bestAge = 1e9;
+  for (int i = 0, k = 0; i < nseeds; i++) { if (!seeds[i].tmdb) continue; if (seeds[i].age < bestAge || (seeds[i].age == bestAge && best >= 0 && rs[k].w > rs[best].w)) { bestAge = seeds[i].age; best = k; } k++; }
   npick[1] = 0; pickSeed = best;
   if (best >= 0) { int skip[8]; for (int i = 0; i < npick[0]; i++) skip[i] = recs_key(pick[0][i].tmdb, pick[0][i].kind); npick[1] = recs_rank_seed(&rs[best], rs, ns, &p, skip, npick[0], pick[1], 20); }
   RecPrefs pt = p; int dex = nex - ns; pt.exclude = ex + ns; pt.nexclude = dex > 0 ? dex : 0; /* the charts keep what was watched; only "Not interested" leaves them */
@@ -249,7 +251,9 @@ static void build_out(Out *o, const RecCand *c, int n, int max) {
 }
 static void finish(void) {
   build_out(&bill, pick[0], npick[0], 8); build_out(&byw, pick[1], npick[1], 20); build_out(&topM, pick[2], npick[2], 10); build_out(&topS, pick[3], npick[3], 10);
-  snprintf(bywTitle, sizeof bywTitle, "%s %s", T("Because you watched"), pickSeed >= 0 && pickSeed < nseeds ? seeds[pickSeed].title : "");
+  { const char *t = ""; for (int i = 0, k = 0; i < nseeds; i++) { if (!seeds[i].tmdb) continue; if (k++ == pickSeed) { t = seeds[i].title; break; } }
+    snprintf(bywTitle, sizeof bywTitle, "%s %s", T("Because you watched"), t); }
+  doneAt = time(NULL);
   const char *rn = recs_region_name(recs_region());
   snprintf(topMTitle, sizeof topMTitle, "%s %s %s", T("Top 10 movies in"), rn, T("this week")); snprintf(topSTitle, sizeof topSTitle, "%s %s %s", T("Top 10 series in"), rn, T("this week"));
   if (byw.n < 4) byw.n = 0; /* a row of two or three looks broken: none instead */
@@ -278,7 +282,21 @@ void recs_dismiss(const Item *it) {
   result_save(); ver++;
 }
 
+int recs_region_count(void) { return NREG; }
+const char *recs_region_code(int i) { return i >= 0 && i < NREG ? REGIONS[i].cc : ""; }
+void recs_status(char *out, size_t cap) {
+  if (!tmdb_has_key()) { snprintf(out, cap, "%s", T("Needs a TMDB key: add one under Keys")); return; }
+  if (!recs_on()) { snprintf(out, cap, "%s", T("Off: Home shows your addons' rows only")); return; }
+  if (phase) { snprintf(out, cap, "%s", T("On. Getting your picks from TMDB...")); return; }
+  if (!bill.n && !byw.n) { snprintf(out, cap, "%s", T("On. Watch something and your picks appear on Home")); return; }
+  long mins = doneAt ? (long)(time(NULL) - doneAt) / 60 : -1;
+  if (mins < 0) snprintf(out, cap, "%s %d %s", T("On."), bill.n + byw.n, T("picks on Home"));
+  else if (mins < 60) snprintf(out, cap, "%s %d %s, %ld %s", T("On."), bill.n + byw.n, T("picks on Home"), mins, T("min ago"));
+  else snprintf(out, cap, "%s %d %s, %ld %s", T("On."), bill.n + byw.n, T("picks on Home"), mins / 60, T("h ago"));
+}
 void recs_tick(void) {
+  { static unsigned ser; static char sig[160]; if (store_serial() != ser) { ser = store_serial(); char s2[160]; snprintf(s2, sizeof s2, "%s|%s|%d|%d", recs_region(), recs_langs(), recs_hide_cinema(), recs_on());
+      if (sig[0] && strcmp(s2, sig)) recs_refresh(); snprintf(sig, sizeof sig, "%s", s2); } } /* a setting changed (Settings writes the store): ask again */
   if (!recs_on() || !tmdb_has_key()) { if (bill.n || byw.n || topM.n || topS.n) { bill.n = byw.n = topM.n = topS.n = 0; ver++; } return; }
   double now = app_now();
   if (!loaded) { loaded = 1; haveResult = result_load(RESULT_AGE * 4); startAt = now + (haveResult ? 20 : 4); libSeen = lib_version(); } /* kept lists at once; asking again waits for Home */

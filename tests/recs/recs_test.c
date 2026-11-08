@@ -24,10 +24,11 @@ static int find(const RecCand *c, int n, int id) { for (int i = 0; i < n; i++) i
 static void synthetic(void) {
   long today = recs_days("2026-11-08");
   /* weights */
-  double fresh = recs_seed_weight(1, 0.95, 0, 0, 0), old = recs_seed_weight(60, 0.95, 0, 0, 0), half = recs_seed_weight(1, 0.4, 0, 0, 0), barely = recs_seed_weight(1, 0.1, 0, 0, 0);
+  double fresh = recs_seed_weight(1, 0.95, 0, 0, 0), old = recs_seed_weight(60, 0.95, 0, 0, 0), half = recs_seed_weight(1, 0.4, 0, 0, 0), barely = recs_seed_weight(1, 0.03, 0, 0, 0), started = recs_seed_weight(1, 0.08, 0, 1, 0);
   CHECK(fresh > old, "recent finished film outweighs an old one (%.3f > %.3f)", fresh, old);
   CHECK(half > 0 && half < fresh, "half-watched counts, less (%.3f)", half);
-  CHECK(barely == 0, "under 20%% watched is ignored");
+  CHECK(barely == 0, "under 5%% watched is ignored");
+  CHECK(started >= 0.48, "a series just started counts as being watched (%.3f)", started);
   CHECK(recs_seed_weight(1, 0.1, 0, 1, 4) > fresh, "a series 4 episodes in counts more than a film");
   CHECK(recs_key(5, 'm') != recs_key(5, 't'), "movie and tv ids kept apart");
   CHECK(recs_days("1970-01-02") == 1 && recs_days("2026-11-08") > 20000, "date to days");

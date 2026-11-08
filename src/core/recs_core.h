@@ -9,7 +9,8 @@
      quality vote_average/10, damped below 200 votes
      fresh   1 for a title out today, falling to 0 at two years; old: a penalty growing past 8 years
    A seed's weight w = recency (half-life RECS_HALF_LIFE_D days) x completion (1 if >= 70% watched or
-   marked watched, 0.5 for 20-70%, 0 under 20%), x1.3 for a series with 3+ episodes watched. */
+   marked watched, 0.5 for 20-70%, 0.25 for 5-20%, 0 under 5%; a series once started 0.5 at least), x1.3 for a
+   series with 3+ episodes watched. */
 #ifndef SB_RECS_CORE_H
 #define SB_RECS_CORE_H
 #include "cJSON.h"

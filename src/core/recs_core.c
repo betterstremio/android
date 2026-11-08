@@ -11,7 +11,8 @@ const RecWeights RECS_W = { 1.0, 0.3, 0.35, 0.1, 0.1, 0.02, 0.6 };
 
 double recs_seed_weight(double ageDays, double frac, int marked, int isSeries, int eps) {
   if (ageDays < 0) ageDays = 0;
-  double comp = marked || frac >= 0.70 ? 1.0 : frac >= 0.20 ? 0.5 : 0.0;
+  double comp = marked || frac >= 0.70 ? 1.0 : frac >= 0.20 ? 0.5 : frac >= 0.05 ? 0.25 : 0.0;
+  if (isSeries && (eps >= 1 || frac >= 0.05) && comp < 0.5) comp = 0.5; /* a series being watched: what it is like matters now */
   if (isSeries && eps >= 3) comp = comp < 1.0 ? 1.0 : comp; /* three episodes in: they like it, whatever the last one's progress */
   double w = pow(0.5, ageDays / RECS_HALF_LIFE_D) * comp;
   if (isSeries && eps >= 3) w *= 1.3;

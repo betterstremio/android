@@ -31,5 +31,8 @@ void recs_set_region(const char *cc);
 const char *recs_langs(void);             /* "hi,en": the region's usual languages unless chosen */
 void recs_set_langs(const char *csv);
 const char *recs_region_name(const char *cc);   /* "India" */
+void recs_status(char *out, size_t cap);  /* Settings' line: on/off, why not, how many picks, how fresh */
+int  recs_region_count(void);
+const char *recs_region_code(int i);
 void recs_refresh(void);                  /* ask again now (a setting changed) */
 #endif

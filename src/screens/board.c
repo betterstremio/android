@@ -593,6 +593,7 @@ static void board_tick(float dt) {
   Board *b = cur(); if (!b) return;
   card_open_tick(b, dt);
   timer_tick(&b->fade, dt); nudge_tick(&b->nudge, dt);
+  if (b->kind == 0) { static unsigned ser; if (store_serial() != ser) { ser = store_serial(); int c = strcmp(store_get("homeLayout", "cinematic"), "classic") != 0; if (c != b->cine) board_rebuild(); } } /* Settings > Home layout */
   if (b->kind == 0 && b->recsVer != recs_version()) { b->recsVer = recs_version(); board_rebuild(); }
   if (b->kind == 0) { /* the focused row's details make room under it; the rows dock under the bar */
     int fo = focusOn(b); for (int i = 0; i < b->n; i++) b->rows[i].extra = b->cine && fo && i == b->rowIdx && b->rows[i].items.n && !b->rows[i].wide && !b->rows[i].ntiles ? CINE_DET_H : 0;

@@ -39,6 +39,7 @@ static int wnBtn; /* About: What's new, beside the update pill, has the focus (U
 static Tween supK; static int supWant; /* the support row: which code shows (0 the coffee, 1 GitHub); OK turns it over */
 #include "ui/img.h"
 #include "core/usb.h"
+#include "core/recs.h"
 
 typedef struct { const char *v, *lb; } Opt;
 typedef struct { char k[160]; char lb[96], ds[200]; const Opt *opts; int nopts; const char *d; int action, info, raw, off, sub; Opt dyn[40]; char dynS[40][64]; } Setting; /* off: greyed, not selectable */
@@ -56,8 +57,9 @@ static const Opt BGS[] = { { "0", "None" }, { "1", "Solid" }, { ".6", "Transpare
 static const Opt ASSO[] = { { "styled", "Styled" }, { "plain", "Plain" } };
 static const Opt SS_OPTS[] = { { "0", "Off" }, { "1", "1 min" }, { "2", "2 min" }, { "5", "5 min" }, { "10", "10 min" } };
 static const Opt ACCENT_OPTS[] = { { "logo", "From the logo" }, { "adaptive", "From the artwork" }, { "purple", "Purple" }, { "violet", "Violet" }, { "fuchsia", "Fuchsia" }, { "pink", "Pink" }, { "rose", "Rose" }, { "red", "Red" }, { "orange", "Orange" }, { "amber", "Amber" }, { "gold", "Gold" }, { "lime", "Lime" }, { "green", "Green" }, { "emerald", "Emerald" }, { "teal", "Teal" }, { "cyan", "Cyan" }, { "sky", "Sky" }, { "blue", "Blue" }, { "indigo", "Indigo" }, { "graphite", "Graphite" } };
-#define NCAT 9
+#define NCAT 10
 #define MAXROWS 48
+static Setting recsS[8];
 static Setting playBase[8], playS[8], subsS[6], audS[5], lookS[2], langS[2], keyS[5], addonS[40], acctS[1], supS[6];
 static Cat cats[NCAT]; static int ncat; /* (Keys leaves when this build carries every key) */
 
@@ -113,6 +115,24 @@ static int lang_opts(void) {
   tmdbOn = tmdb_has_key(); if (tmdb_builtin()) return 1; /* the app's own key: nothing to add, the row and its preview go */
   set_act(&langS[1], "__keys", "Titles and descriptions", tmdbOn ? "In the app\xe2\x80\x99s language, from TMDB (under Keys)" : "Only in English. Add a TMDB key under Keys");
   return 2;
+}
+/* For You: recommendations on Home (core/recs.c); every row is a store key recs.c and Home watch, so a change applies at once */
+static const Opt HLAY[] = { { "cinematic", "Cinematic" }, { "classic", "Classic" } };
+static const Opt RLANG[] = { { "", "Automatic" }, { "hi,en", "Hindi and English" }, { "en", "English" }, { "hi", "Hindi" }, { "ta,en", "Tamil and English" }, { "te,en", "Telugu and English" },
+  { "ml,en", "Malayalam and English" }, { "pa,hi,en", "Punjabi, Hindi and English" }, { "es,en", "Spanish and English" }, { "fr,en", "French and English" }, { "ko,en", "Korean and English" }, { "ja,en", "Japanese and English" } };
+static int recs_opts(void) {
+  int n = 0; char st[200]; recs_status(st, sizeof st);
+  set_s(&recsS[n++], "recsOn", "Recommendations", st, OO, 2, "true"); recsS[0].raw = 1;
+  set_s(&recsS[n++], "homeLayout", "Home layout", "Cinematic: a billboard and cards that open, as on Netflix", HLAY, 2, "cinematic");
+  { Setting *s = &recsS[n++]; set_s(s, "recsRegion", "Region", "Top 10 rows and where titles stream", NULL, 0, ""); int k = 0;
+    snprintf(s->dynS[k], 64, "%s", ""); s->dyn[k].v = s->dynS[k]; s->dyn[k].lb = "Automatic"; k++;
+    for (int i = 0; i < recs_region_count() && k < 40; i++) { snprintf(s->dynS[k], 64, "%s", recs_region_code(i)); s->dyn[k].v = s->dynS[k]; s->dyn[k].lb = recs_region_name(recs_region_code(i)); k++; }
+    s->opts = s->dyn; s->nopts = k; }
+  set_s(&recsS[n++], "recsLangs", "Languages", "Automatic: your region's, plus what you watch a lot", RLANG, (int)(sizeof RLANG / sizeof RLANG[0]), "");
+  set_s(&recsS[n++], "recsHideCinema", "Hide films still in cinemas", "Leaves out films out less than 30 days ago", OO, 2, "false");
+  set_s(&recsS[n++], "recsPaused", "Pause history", "What you watch from now on is not used for picks", OO, 2, "false");
+  set_act(&recsS[n++], "__recsNow", "Refresh picks now", "Ask TMDB again with your latest watching");
+  return n;
 }
 static int keys_opts(void) {
   int n = 0; tmdbOn = tmdb_has_key(); traktOn = trakt_has_key();
@@ -190,7 +210,7 @@ static void build(void) {
     for (int j = 0; j < 10 && n < 40; j++) { int have = 0; for (int i = 0; i < i18n_lang_count(); i++) if (!strcmp(i18n_lang_code(i), ORDER[j])) have = 1; if (!have) continue;
       snprintf(s->dynS[n], 64, "%s", ORDER[j]); s->dyn[n].v = s->dynS[n]; s->dyn[n].lb = i18n_lang_name(ORDER[j]); n++; }
     s->opts = s->dyn; s->nopts = n; }
-  int nl = lang_opts(), nk = keys_opts(), na = addon_opts();
+  int nl = lang_opts(), nk = keys_opts(), na = addon_opts(), nr = recs_opts();
   set_act(&acctS[0], "__logout", "Log out", S.acct); acctS[0].raw = 1;
   int nab = about_opts();
   /* grouped by task: what you watch, what the screens look like, account and system; Log out on its own, last */
@@ -198,6 +218,7 @@ static void build(void) {
     { "Watch", "Playback", "set_play", "Seek step, next episode, picture size", NULL, playS, 6, 0 }, /* (the count: play_layout) */
     { "Watch", "Subtitles", "set_subs", "Language, size, colour, background", "subs", subsS, 6, 0 },
     { "Watch", "Audio", "set_aud", "Default audio language, DTS, interface sounds", NULL, audS, 5, 0 },
+    { "Watch", "For You", "g_spark", "Recommendations on Home, region, languages", NULL, recsS, nr, 0 },
     { "Screens", "Appearance", "set_look", "Accent colour", "look", lookS, 2, 0 },
     { "Screens", "Language", "set_lang", "The language of the app", NULL, langS, nl, 0 },
     { "Account and system", "Addons", "set_addon", "", NULL, addonS, na, 0 },
@@ -394,6 +415,7 @@ static int key(int k) {
     if (op->info) return 1;
     if (op->action) { if (!strcmp(op->k, "__coll")) { coll_card(); return 1; }
       if (!strcmp(op->k, "__tmdb")) { qrcard_show_tmdb(on_tmdb_card, NULL); return 1; }
+      if (!strcmp(op->k, "__recsNow")) { recs_refresh(); toast(T("Getting new picks"), 2000, NULL); return 1; }
       if (!strcmp(op->k, "__tmdbOff")) { tmdb_key_clear(); relang(); toast(T("Titles and descriptions in English"), 2000, NULL); return 1; }
       if (!strcmp(op->k, "__trakt")) { qrcard_show_trakt(on_trakt_card, NULL); return 1; }
       if (!strcmp(op->k, "__traktOff")) { trakt_key_clear(); relang(); toast(T("The Trakt id is gone"), 2000, NULL); return 1; }
