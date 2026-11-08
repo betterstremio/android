@@ -74,6 +74,14 @@ static void synthetic(void) {
   RecCand o2[4]; int n2 = recs_rank(&s2, 1, &p2, o2, 4);
   CHECK(n2 == 2 && o2[0].tmdb == 601, "a picked language wins a tie, even from lower in the list");
 
+  /* "Hide films still in cinemas": off shows a 10-day-old film, on leaves it out */
+  { cJSON *lz = cJSON_CreateArray(); char d10[32]; long t = today - 10; long z = t + 719468, era = (z >= 0 ? z : z - 146096) / 146097, doe = z - era * 146097, yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365, doy = doe - (365 * yoe + yoe / 4 - yoe / 100), mp = (5 * doy + 2) / 153;
+    int dd = (int)(doy - (153 * mp + 2) / 5 + 1), mm = (int)(mp < 10 ? mp + 3 : mp - 9); long yy = yoe + era * 400 + (mm <= 2); snprintf(d10, sizeof d10, "%04ld-%02d-%02d", yy, mm, dd);
+    cJSON_AddItemToArray(lz, ent(800, "Just out", d10, "hi", 18, 0, 7, 50, 0)); cJSON_AddItemToArray(lz, ent(801, "Older", "2025-06-01", "hi", 18, 0, 7, 500, 0));
+    RecCand cz[4]; int nz = recs_parse(lz, 'm', cz, 4); RecSeed sz = { .tmdb = 900, .kind = 'm', .genres = { 18 }, .ng = 1, .lang = "hi", .w = 1, .list = cz, .n = nz };
+    RecPrefs off = { .langs = { "hi" }, .nlangs = 1, .today = today }, on = off; on.minMovieAge = 30; RecCand oz[4];
+    int a = recs_rank(&sz, 1, &off, oz, 4), hasA = find(oz, a, 800) >= 0; int b2 = recs_rank(&sz, 1, &on, oz, 4), hasB = find(oz, b2, 800) >= 0;
+    CHECK(hasA && !hasB && b2 == 1, "hide-cinema toggle: off shows a 10-day-old film (%d), on leaves it out (%d)", hasA, hasB); cJSON_Delete(lz); }
   /* Top 10: kept in order, dismissed left out */
   RecCand t10[RECS_LIST]; int nt = recs_filter(cb, nb, &p, t10, 10);
   CHECK(nt == 3 && t10[0].tmdb == 101 && t10[1].tmdb == 300, "Top 10 keeps the chart order, drops dismissed/adult/unreleased (%d)", nt);

@@ -372,6 +372,7 @@ void sb_meta(const char *type, const char *id, void (*cb)(cJSON *, void *), void
 
 /* ---- library ------------------------------------------------------------------------------- */
 static cJSON *lib_arr(void) { cJSON *l = store_node("lib"); if (!cJSON_IsObject(l)) { l = cJSON_CreateObject(); store_set_node("lib", l); } return l; }
+cJSON *lib_all(void) { return lib_arr(); }
 cJSON *lib_get(const char *id) { return cJSON_GetObjectItemCaseSensitive(lib_arr(), id); }
 int lib_has(const char *id) { cJSON *it = lib_get(id); return it && !js_bool(it, "removed", 1); }
 void lib_invalidate(void) { libVer++; }

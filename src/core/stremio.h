@@ -70,6 +70,7 @@ int  sb_runtime_min(const char *s);
 void sb_fmt_runtime(int mn, char *out, size_t cap);
 
 /* ---- library / Continue Watching / watched ---- */
+cJSON *lib_all(void);                   /* the whole library (an object keyed by id; belongs to the store) */
 cJSON *lib_get(const char *id);         /* the account's item or NULL (belongs to the store) */
 int  lib_has(const char *id);           /* in the Library (not removed) */
 void lib_toggle(const Item *it);

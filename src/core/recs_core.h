@@ -47,6 +47,7 @@ typedef struct {
   const int *exclude; int nexclude;   /* TMDB ids (kind folded in: recs_key) already watched or dismissed */
   long today;                         /* days since 1970, for "fresh" */
   int allowAdult;
+  int minMovieAge;                    /* days: films out in cinemas more recently than this are left out (0: none) */
 } RecPrefs;
 
 /* a seed's weight from what the library says */

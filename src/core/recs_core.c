@@ -94,7 +94,10 @@ static double part_rest(const Taste *t, const RecPrefs *p, const RecCand *c) {
     double yrs = age / 365.0 - 8; if (yrs > 0) old = yrs > 10 ? 10 : yrs; }
   return RECS_W.genre * taste_genre(t, c) + RECS_W.lang * taste_lang(t, p, c) + RECS_W.quality * q + RECS_W.fresh * fresh - RECS_W.old * old;
 }
-static int unreleased(const RecPrefs *p, const RecCand *c) { long d = recs_days(c->date); return !d || (p->today && d > p->today); }
+static int unreleased(const RecPrefs *p, const RecCand *c) {
+  long d = recs_days(c->date); if (!d || (p->today && d > p->today)) return 1;
+  return c->kind == 'm' && p->minMovieAge > 0 && p->today && p->today - d < p->minMovieAge; /* "Hide films still in cinemas" */
+}
 static int cmp_score(const void *a, const void *b) { double x = ((const RecCand *)a)->score, y = ((const RecCand *)b)->score; return x < y ? 1 : x > y ? -1 : 0; }
 
 /* every seed's list merged into one scored, de-duplicated array (not yet ordered) */
