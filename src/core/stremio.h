@@ -103,6 +103,10 @@ typedef struct { char name[96]; Stream *items; int n; } StreamGroup;
 typedef void (*StreamPartCb)(StreamGroup *g, int groupIdx, void *ud);
 typedef void (*StreamDoneCb)(int total, void *ud);
 unsigned sb_streams(const char *type, const char *vid, StreamPartCb part, StreamDoneCb done, void *ud);
+/* a preview's lookup: on the previews' own network lane, 5 s per addon, addons that keep failing left out for a while,
+   and cancellable (the card left: what is still out stops) */
+unsigned sb_streams_bg(const char *type, const char *vid, StreamPartCb part, StreamDoneCb done, void *ud);
+void     sb_streams_cancel(unsigned tok);
 /* the same, also told after each answer how many addons are still out of how many (the "waiting for N addons" line) */
 typedef void (*StreamAnsCb)(int pending, int count, void *ud);
 unsigned sb_streams_ex(const char *type, const char *vid, StreamPartCb part, StreamDoneCb done, StreamAnsCb ans, void *ud);

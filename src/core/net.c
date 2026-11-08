@@ -48,19 +48,21 @@ typedef struct Req {
   unsigned id; char *url, *hdr, *post, *ctype, *method; size_t postLen; NetCb cb; void *ud; long timeoutMs; cJSON *json; /* postLen: a raw body (net_send), else post is text; json: the body already parsed on the worker */
   int status; unsigned char *body; size_t len, cap; int cancelled, done;
   int size; double total;  /* net_size: only the headers are read (2: net_resolve, the final address kept) */
+  int bg;                  /* the previews' lane */
   char *eff;
   int file;                /* net_file: url is a local path */
   struct Req *next;
 } Req;
 static pthread_mutex_t mu = PTHREAD_MUTEX_INITIALIZER;
 static pthread_cond_t cv = PTHREAD_COND_INITIALIZER;
-static Req *queue, *queueTail, *slowQ, *slowTail, *finished, *inflight[8], *fqueue, *fqueueTail;
-static pthread_cond_t slowCv = PTHREAD_COND_INITIALIZER;
+static Req *queue, *queueTail, *slowQ, *slowTail, *bgQ, *bgTail, *finished, *inflight[10], *fqueue, *fqueueTail;
+static pthread_cond_t slowCv = PTHREAD_COND_INITIALIZER, bgCv = PTHREAD_COND_INITIALIZER;
 static pthread_cond_t fcv = PTHREAD_COND_INITIALIZER;
 static unsigned nextId = 1; static int npending;
-#define WORKERS 8   /* 0-4 take the quick requests (catalogs, details, the account); 5-7 the slow ones (stream addons, up to
+#define WORKERS 10   /* 0-4 take the quick requests (catalogs, details, the account); 5-7 the slow ones (stream addons, up to
                        45 s each): details never wait behind a debrid addon thinking */
 #define SLOW0 5
+#define BG0 8   /* 8-9: the previews' lane (stream lookups and link resolving for a card at rest): never the slots a title page waits on */
 
 static size_t on_data(char *p, size_t s, size_t n, void *ud) {
   Req *r = ud; size_t add = s * n;
@@ -133,8 +135,8 @@ static void *worker(void *arg) { plat_thread_background(5);
   int slot = (int)(size_t)arg;
   for (;;) {
     pthread_mutex_lock(&mu);
-    if (slot >= SLOW0) while (!slowQ) pthread_cond_wait(&slowCv, &mu); else while (!queue) pthread_cond_wait(&cv, &mu);
-    Req *r; if (slot >= SLOW0) { r = slowQ; slowQ = r->next; if (!slowQ) slowTail = NULL; } else { r = queue; queue = r->next; if (!queue) queueTail = NULL; }
+    if (slot >= BG0) while (!bgQ) pthread_cond_wait(&bgCv, &mu); else if (slot >= SLOW0) while (!slowQ) pthread_cond_wait(&slowCv, &mu); else while (!queue) pthread_cond_wait(&cv, &mu);
+    Req *r; if (slot >= BG0) { r = bgQ; bgQ = r->next; if (!bgQ) bgTail = NULL; } else if (slot >= SLOW0) { r = slowQ; slowQ = r->next; if (!slowQ) slowTail = NULL; } else { r = queue; queue = r->next; if (!queue) queueTail = NULL; }
     r->next = NULL; inflight[slot] = r;
     pthread_mutex_unlock(&mu);
     if (!r->cancelled) { perform(r);
@@ -185,11 +187,13 @@ int net_init(const char *ca) {
   return 1;
 }
 static void push_req(Req *r) { /* under mu */
-  if (r->timeoutMs > 20000) { if (slowTail) slowTail->next = r; else slowQ = r; slowTail = r; pthread_cond_signal(&slowCv); }
+  if (r->bg) { if (bgTail) bgTail->next = r; else bgQ = r; bgTail = r; pthread_cond_signal(&bgCv); }
+  else if (r->timeoutMs > 20000) { if (slowTail) slowTail->next = r; else slowQ = r; slowTail = r; pthread_cond_signal(&slowCv); }
   else { if (queueTail) queueTail->next = r; else queue = r; queueTail = r; pthread_cond_signal(&cv); }
 }
+static int bgNext; /* the next request goes to the previews' lane */
 static unsigned enqueue_x(const char *url, const char *hdr, const char *post, const char *ctype, long timeoutMs, int size, NetCb cb, void *ud) {
-  Req *r = calloc(1, sizeof *r); r->url = strdup(url); r->hdr = hdr ? strdup(hdr) : NULL; r->post = post ? strdup(post) : NULL; r->ctype = ctype ? strdup(ctype) : NULL; r->cb = cb; r->ud = ud; r->timeoutMs = timeoutMs; r->size = size;
+  Req *r = calloc(1, sizeof *r); r->bg = bgNext; bgNext = 0; r->url = strdup(url); r->hdr = hdr ? strdup(hdr) : NULL; r->post = post ? strdup(post) : NULL; r->ctype = ctype ? strdup(ctype) : NULL; r->cb = cb; r->ud = ud; r->timeoutMs = timeoutMs; r->size = size;
   pthread_mutex_lock(&mu);
   r->id = nextId++; push_req(r); npending++;
   pthread_mutex_unlock(&mu);
@@ -202,7 +206,8 @@ unsigned net_get_timeout(const char *url, int timeoutMs, NetCb cb, void *ud) { r
 unsigned net_get(const char *url, NetCb cb, void *ud) { return enqueue(url, NULL, NULL, cb, ud); }
 unsigned net_get_hdr(const char *url, const char *hdr, NetCb cb, void *ud) { return enqueue(url, hdr, NULL, cb, ud); }
 unsigned net_size(const char *url, NetCb cb, void *ud) { return enqueue_x(url, NULL, NULL, NULL, 10000, 1, cb, ud); }
-unsigned net_resolve(const char *url, NetCb cb, void *ud) { return enqueue_x(url, NULL, NULL, NULL, 10000, 2, cb, ud); }
+unsigned net_resolve(const char *url, NetCb cb, void *ud) { bgNext = 1; return enqueue_x(url, NULL, NULL, NULL, 10000, 2, cb, ud); }
+unsigned net_get_bg(const char *url, int timeoutMs, NetCb cb, void *ud) { bgNext = 1; return enqueue_x(url, NULL, NULL, NULL, timeoutMs, 0, cb, ud); }
 unsigned net_post_json(const char *url, const char *json, NetCb cb, void *ud) { return enqueue(url, NULL, json, cb, ud); }
 unsigned net_post_hdr_t(const char *url, const char *body, const char *contentType, const char *headers, int timeoutMs, NetCb cb, void *ud) {
   return enqueue_c(url, headers, body ? body : "", contentType ? contentType : "", timeoutMs, cb, ud);
@@ -219,6 +224,7 @@ void net_cancel(unsigned id) {
   pthread_mutex_lock(&mu);
   for (Req *r = queue; r; r = r->next) if (r->id == id) r->cancelled = 1;
   for (Req *r = slowQ; r; r = r->next) if (r->id == id) r->cancelled = 1;
+  for (Req *r = bgQ; r; r = r->next) if (r->id == id) r->cancelled = 1;
   for (Req *r = fqueue; r; r = r->next) if (r->id == id) r->cancelled = 1;
   for (int i = 0; i < WORKERS; i++) if (inflight[i] && inflight[i]->id == id) inflight[i]->cancelled = 1;
   for (Req *r = finished; r; r = r->next) if (r->id == id) r->cancelled = 1;

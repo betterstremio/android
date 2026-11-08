@@ -34,7 +34,7 @@ static int clip; static double clipFrac, clipAbs, showAt, settleAt;
 #define CLIP_GRACE 0.7      /* after the first addon's answer, the others this long to bring a better one */
 #define RESOLVE_MAX 5.0     /* no resolved address by then: the TV is given the link itself */
 typedef struct {
-  char id[64], url[2][SB_URL_MAX], addon[96], label[160], final[SB_URL_MAX]; int score[2], done, resolving, resolved, failed;
+  char id[64], url[2][SB_URL_MAX], addon[96], label[160], final[SB_URL_MAX]; int score[2], done, resolving, resolved, failed; unsigned tok;
   double firstAt, askedAt, pickAt, resolvedAt, frac, abs; unsigned g;
 } ClipPick;
 static ClipPick SL[2]; /* 0: the card in focus; 1: the one to its right, made ready ahead */
@@ -132,6 +132,8 @@ static void on_clip_done(int total, void *ud) { (void)total; ClipPick *P = slot_
 /* a card's link: a resolved one kept from before, else its addons asked now (k: which slot) */
 static void clip_search(const Item *it, int k) {
   ClipPick *P = &SL[k]; if (!strcmp(P->id, it->id)) return;
+  if (k == 0 && SL[0].tok && !SL[0].done && strcmp(SL[1].id, it->id)) sb_streams_cancel(SL[0].tok); /* the card left behind: what it still waits for stops */
+  if (k == 1 && SL[1].tok && !SL[1].done) sb_streams_cancel(SL[1].tok);
   if (k == 0 && !strcmp(SL[1].id, it->id)) { SL[0] = SL[1]; SL[0].g = ++pgen; memset(&SL[1], 0, sizeof SL[1]); /* the one made ready ahead: now in focus */
     if (SL[0].resolving && !SL[0].resolved) { SL[0].resolving = 0; SL[0].failed = 0; pick_resolve(&SL[0], 0); } return; } /* (its resolve answers went to the old slot: asked again, they come back at once) */
   memset(P, 0, sizeof *P); snprintf(P->id, sizeof P->id, "%s", it->id); P->askedAt = now_s(); P->g = ++pgen;
@@ -142,7 +144,7 @@ static void clip_search(const Item *it, int k) {
   char vid[96]; CwInfo ci;
   if (series) { if (lib_cw_info(it, &ci) && ci.vid[0] && strcmp(ci.vid, it->id)) snprintf(vid, sizeof vid, "%s", ci.vid); else snprintf(vid, sizeof vid, "%s:1:1", it->id); }
   else snprintf(vid, sizeof vid, "%s", it->id);
-  if (!sb_streams(it->type, vid, on_clip_part, on_clip_done, slot_ud(k)) && !P->done) P->done = 1; /* (no addon to ask) */
+  P->tok = sb_streams_bg(it->type, vid, on_clip_part, on_clip_done, slot_ud(k)); if (!P->tok && !P->done) P->done = 1; /* (no addon to ask) */
 }
 /* plays what the search has, or the trailer when it has nothing */
 static void clip_go(double t) {
@@ -169,6 +171,7 @@ void bgt_tick(const BgtView *v) {
   double t = now_s();
   if (st == S_GONE && t >= hiddenAt && (v->idle >= 0.7f || t - hiddenAt >= 4)) { st = S_OFF; if (H.unload) H.unload(H.ud); }
   int can = v->browsing && v->focused && !v->blocked && !v->spotlight && !v->shedding && !getenv("SB_NOBTR"), isClip = can && clip_for(v->focused);
+  if (!v->browsing) for (int k = 0; k < 2; k++) if (SL[k].tok && !SL[k].done) { sb_streams_cancel(SL[k].tok); SL[k].tok = 0; SL[k].id[0] = 0; } /* a page open: its own requests come first */
   if (isClip && v->idle > PREFETCH_IDLE) { if (strcmp(CP.id, v->focused->id)) settleAt = t - v->idle; clip_search(v->focused, 0); } /* the link, looked for while the card opens */
   for (int k = 0; k < 2; k++) if (SL[k].id[0] && !SL[k].resolving && pick_ready(&SL[k], t)) pick_resolve(&SL[k], k);    /* picked: resolved now */
   if (isClip && CP.resolved && v->next && clip_for(v->next) && v->idle > PREFETCH_IDLE + 0.3f) clip_search(v->next, 1);  /* then the card to its right */

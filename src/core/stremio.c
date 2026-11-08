@@ -669,7 +669,17 @@ static int stream_parse(Stream *o, const cJSON *s, const char *addon) {
   const cJSON *subs = js_arr(s, "subtitles"); o->nsubs = subs ? cJSON_GetArraySize(subs) : 0; if (o->nsubs) stream_subs_keep(o->url[0] ? o->url : o->ext, subs, addon);
   return 1;
 }
-typedef struct { unsigned tok; int pending, total, cancelled, count; StreamPartCb part; StreamDoneCb done; StreamAnsCb ans; void *ud; cJSON *own; } StreamReq;
+typedef struct { unsigned tok; int pending, total, cancelled, count; StreamPartCb part; StreamDoneCb done; StreamAnsCb ans; void *ud; cJSON *own; int bg, nids; unsigned ids[24]; } StreamReq;
+/* previews: the requests still out (to cancel), and the addons that gave no answer twice running (left out 10 min) */
+static StreamReq *bgLive[8]; static int bgReq;
+static struct { char name[96]; int fails; time_t until; } deadAd[16];
+static int addon_dead(const char *nm) { for (int i = 0; i < 16; i++) if (!strcmp(deadAd[i].name, nm)) return deadAd[i].until > time(NULL); return 0; }
+static void addon_outcome(const char *nm, int ok) {
+  int k = -1; for (int i = 0; i < 16 && k < 0; i++) if (!strcmp(deadAd[i].name, nm)) k = i;
+  if (k < 0) { if (ok) return; for (int i = 0; i < 16 && k < 0; i++) if (!deadAd[i].name[0] || deadAd[i].until < time(NULL) - 3600) k = i; if (k < 0) return; memset(&deadAd[k], 0, sizeof deadAd[k]); copy_str(deadAd[k].name, sizeof deadAd[k].name, nm); }
+  if (ok) { deadAd[k].fails = 0; return; }
+  if (++deadAd[k].fails >= 2) { deadAd[k].fails = 0; deadAd[k].until = time(NULL) + 600; fprintf(stderr, "[addon] %s left out of previews for 10 min (no answer twice)\n", nm); }
+}
 typedef struct { StreamReq *req; int idx; char name[96]; } StreamPart;
 static unsigned streamTok;
 static void streams_answer(StreamPart *p, const cJSON *arr) {
@@ -682,13 +692,14 @@ static void streams_answer(StreamPart *p, const cJSON *arr) {
 static void stream_part_done(StreamPart *p) {
   StreamReq *r = p->req;
   --r->pending; if (!r->cancelled && r->ans) r->ans(r->pending, r->count, r->ud);
-  if (r->pending <= 0) { if (!r->cancelled) r->done(r->total, r->ud); cJSON_Delete(r->own); free(r); }
+  if (r->pending <= 0) { if (!r->cancelled) r->done(r->total, r->ud); for (int i = 0; i < 8; i++) if (bgLive[i] == r) bgLive[i] = NULL; cJSON_Delete(r->own); free(r); }
   free(p);
 }
 static void on_streams(int st, const unsigned char *b, size_t n, void *ud) {
   StreamPart *p = ud; StreamReq *r = p->req;
+  if (r->bg && st != -1) addon_outcome(p->name, st == 200);
   if (!r->cancelled) { cJSON *j = st == 200 ? net_json(b) : NULL;
-    if (st != 200 || !j) fprintf(stderr, "[addon] streams from %s: %s\n", p->name, st == 200 ? "not JSON" : st > 0 ? "HTTP error" : "no answer");
+    if (st != 200 || !j) fprintf(stderr, "[addon] streams from %s: %s%s\n", p->name, st == 200 ? "not JSON" : st > 0 ? "HTTP error" : "no answer", r->bg ? " (preview)" : "");
     streams_answer(p, js_arr(j, "streams")); net_json_free(j); }
   stream_part_done(p);
 }
@@ -701,6 +712,11 @@ static const cJSON *video_streams(const char *type, const char *vid) {
 static void on_own_streams(int st, const unsigned char *b, size_t n, void *ud) { (void)st; (void)b; (void)n; StreamPart *p = ud; if (!p->req->cancelled) streams_answer(p, p->req->own); stream_part_done(p); }
 unsigned sb_streams(const char *type, const char *vid, StreamPartCb part, StreamDoneCb done, void *ud) { return sb_streams_ex(type, vid, part, done, NULL, ud); }
 static unsigned streams_req(const char *type, const char *vid, int only, StreamPartCb part, StreamDoneCb done, StreamAnsCb ans, void *ud);
+unsigned sb_streams_bg(const char *type, const char *vid, StreamPartCb part, StreamDoneCb done, void *ud) { bgReq = 1; return streams_req(type, vid, -1, part, done, NULL, ud); }
+void sb_streams_cancel(unsigned tok) {
+  for (int i = 0; i < 8; i++) { StreamReq *r = bgLive[i]; if (!r || r->tok != tok || r->cancelled) continue; r->cancelled = 1; for (int k = 0; k < r->nids; k++) net_cancel(r->ids[k]); }
+}
+static unsigned streams_req(const char *type, const char *vid, int only, StreamPartCb part, StreamDoneCb done, StreamAnsCb ans, void *ud);
 unsigned sb_streams_ex(const char *type, const char *vid, StreamPartCb part, StreamDoneCb done, StreamAnsCb ans, void *ud) { return streams_req(type, vid, -1, part, done, ans, ud); }
 unsigned sb_streams_one(const char *type, const char *vid, int which, StreamPartCb part, StreamDoneCb done, void *ud) { return streams_req(type, vid, which, part, done, NULL, ud); }
 int sb_stream_addons(const char *type, const char *vid, char (*names)[96], int max) {
@@ -711,17 +727,20 @@ int sb_stream_addons(const char *type, const char *vid, char (*names)[96], int m
 }
 /* only >= 0: that one of the addons serving the video (in the user's order), alone */
 static unsigned streams_req(const char *type, const char *vid, int only, StreamPartCb part, StreamDoneCb done, StreamAnsCb ans, void *ud) {
-  cJSON *a = sb_addons(); StreamReq *r = calloc(1, sizeof *r); r->tok = ++streamTok; r->part = part; r->done = done; r->ans = ans; r->ud = ud;
+  cJSON *a = sb_addons(); StreamReq *r = calloc(1, sizeof *r); r->tok = ++streamTok; r->part = part; r->done = done; r->ans = ans; r->ud = ud; r->bg = bgReq; bgReq = 0;
   const cJSON *own = video_streams(type, vid);
   if (own && only > 0) own = NULL, a = NULL; /* (its own list is the one group) */
   if (own) { r->own = cJSON_Duplicate(own, 1); StreamPart *p = calloc(1, sizeof *p); p->req = r; copy_str(p->name, sizeof p->name, T("This title")); r->pending = r->count = 1;
     net_file("", on_own_streams, p); return r->tok; } /* (a file that is not there: answered on the next frame, never inside this call) */
   int idx = 0; const cJSON *ad;
   if (a) cJSON_ArrayForEach(ad, a) { if (!addon_serves(ad, "stream", type, vid)) continue; if (only >= 0 && idx != only) { idx++; continue; }
+    if (r->bg && addon_dead(addon_name(ad))) { idx++; continue; } /* (a preview: an addon that keeps failing is not waited for) */
     StreamPart *p = calloc(1, sizeof *p); p->req = r; p->idx = idx++; copy_str(p->name, sizeof p->name, addon_name(ad));
     char base[512], url[900]; addon_base(ad, base, sizeof base); addon_url(url, sizeof url, base, "stream", type, vid, NULL);
-    r->pending++; net_get_timeout(url, 45000, on_streams, p); } /* slow debrid addons can take 20-30 s: the phone and PC apps wait as long */
+    r->pending++; unsigned id = r->bg ? net_get_bg(url, 5000, on_streams, p) : net_get_timeout(url, 45000, on_streams, p); /* slow debrid addons can take 20-30 s: the phone and PC apps wait as long (a preview: 5 s, it would be too late anyway) */
+    if (r->nids < 24) r->ids[r->nids++] = id; }
   r->count = r->pending; if (!r->pending) { done(0, ud); free(r); return 0; }
+  if (r->bg) { int k = 0; while (k < 8 && bgLive[k]) k++; if (k < 8) bgLive[k] = r; }
   return r->tok;
 }
 void sb_stream_info(const Stream *s, char *out, size_t cap) { snprintf(out, cap, "%s %s %s", s->name[0] ? s->name : s->addon, s->title, s->filename); for (char *p = out; *p; p++) if (*p == '\n' || *p == '\r' || *p == '\t') *p = ' '; }
