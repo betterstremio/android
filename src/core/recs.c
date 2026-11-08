@@ -192,8 +192,18 @@ static void gather_seeds(void) {
   }
   qsort(all, (size_t)n, sizeof *all, cmp_seed); nseeds = n < RECS_MAX_SEEDS ? n : RECS_MAX_SEEDS; memcpy(seeds, all, sizeof(Seed) * (size_t)nseeds);
 }
+/* the languages the user watches a lot join the region's own (Ireland + a Hindi-heavy history: English and Hindi),
+   unless languages were chosen in Settings */
+static void langs_from_history(void) {
+  if (store_get("recsLangs", "")[0]) return;
+  double tot = 0; for (int i = 0; i < nseeds; i++) tot += seeds[i].tmdb ? seeds[i].w : 0; if (tot <= 0) return;
+  for (int i = 0; i < nseeds && nlangs < 4; i++) { const char *l = seeds[i].lang; if (!seeds[i].tmdb || !l[0]) continue;
+    int have = 0; for (int k = 0; k < nlangs && !have; k++) have = !strcmp(langs[k], l); if (have) continue;
+    double w = 0; for (int j = 0; j < nseeds; j++) if (seeds[j].tmdb && !strcmp(seeds[j].lang, l)) w += seeds[j].w;
+    if (w / tot >= 0.25) { /* first when it is most of the watching */ if (w / tot >= 0.5) { memmove(langs[1], langs[0], sizeof langs[0] * (size_t)nlangs); snprintf(langs[0], 4, "%s", l); } else snprintf(langs[nlangs], 4, "%s", l); nlangs++; } }
+}
 static void ask_lists(void) {
-  char p[600], c[96]; int yr = (int)(1970 + today_days() / 365.25) - 10;
+  char p[600], c[96]; langs_from_history(); int yr = (int)(1970 + today_days() / 365.25) - 10;
   for (int i = 0; i < nseeds; i++) { Seed *s = &seeds[i]; if (!s->tmdb) continue; const char *seg = s->tk == 'm' ? "movie" : "tv";
     snprintf(p, sizeof p, "/%s/%d/recommendations?page=1", seg, s->tmdb); snprintf(c, sizeof c, "recs:rec:%c%d", s->tk, s->tmdb); int j = add_job(J_REC, p, c, LIST_AGE); if (j >= 0) jobs[j].seed = i;
     snprintf(p, sizeof p, "/discover/%s?with_original_language=%s&with_genres=%d&sort_by=popularity.desc&vote_count.gte=20&%s.gte=%d-01-01", seg, s->lang, s->ng ? s->genres[0] : 18, s->tk == 'm' ? "primary_release_date" : "first_air_date", yr);
@@ -244,7 +254,9 @@ static void finish(void) {
   snprintf(topMTitle, sizeof topMTitle, "%s %s %s", T("Top 10 movies in"), rn, T("this week")); snprintf(topSTitle, sizeof topSTitle, "%s %s %s", T("Top 10 series in"), rn, T("this week"));
   if (byw.n < 4) byw.n = 0; /* a row of two or three looks broken: none instead */
   result_save(); haveResult = 1; ver++;
-  fprintf(stderr, "[recs] ready: %d seeds, billboard %d, byw %d, top %d/%d, %d requests\n", nseeds, bill.n, byw.n, topM.n, topS.n, requests);
+  fprintf(stderr, "[recs] ready: %d seeds, billboard %d, byw %d, top %d/%d, %d requests, languages", nseeds, bill.n, byw.n, topM.n, topS.n, requests);
+  for (int l = 0; l < nlangs; l++) fprintf(stderr, " %s", langs[l]);
+  fprintf(stderr, "\n");
 }
 static void start_run(void) {
   runId++; njobs = 0; phase = 1; requests = 0; memset(topN, 0, sizeof topN);
