@@ -105,6 +105,10 @@ static const struct { const char *t, *l, *b[MAXB], *ic[MAXB]; int pv, ctl; } TOU
     { "g_bug", "g_heart" }, PV_THANKS, 0 },
 };
 #define NTOUR (int)(sizeof TOUR / sizeof TOUR[0])
+/* a remote without the colour keys (Google TV, Fire TV, most Android TV remotes): the remote page has three points, the
+   first reaching Settings and Search at the top left; kst() maps its points to the scenes of the four-key page */
+static int ckeys(void) { return plat_color_keys(); }
+static int kst(int st) { return !ckeys() && st >= 1 ? st + 1 : st; }
 static int ykOff; /* the keys page's first step, when TMDB is built in: Trakt's */
 typedef struct { char t[120], x[300]; const char *ic; char icn[24]; int nt, nx; } News;
 static struct {
@@ -311,12 +315,14 @@ static void sc_keys(int st, float t) {
     float L = 7.0f; t = fmodf(t, L); int red = st == 0; cam(t, 0.4f, 2.2f, red ? 78 : 166, 50, 1.9f); /* in on its key as it is pressed, out as its page fills the screen */
     float pa = vis(t, 1.4f, 5.4f, 0.3f), s = 0.9f + 0.1f * ease_apply(EASE_OUT, pa);
     home(-1, 1, 0, 0);
-    push(1.4f, L, red ? ORB_RED : ORB_GREEN, 1); push(5.1f, L, ORB_BACK, 0.7f);
+    push(1.4f, L, red ? (ckeys() ? ORB_RED : ORB_OK) : ORB_GREEN, 1); push(5.1f, L, ORB_BACK, 0.7f);
     if (pa > 0.004f) { gfx_scale_push(s, s, red ? 78 : 166, 50);
       if (red) settings_page(pa, -1, 0, 0); else { int ty = t < 2.3f ? 0 : t < 2.6f ? 1 : t < 2.9f ? 2 : t < 3.2f ? 3 : 4; for (int k = 0; k < 4; k++) push(2.3f + 0.3f * k, L, ORB_OK, 0.25f); search_page(pa, ty, cl01((t - 3.3f) / 0.8f), 0); }
       gfx_scale_pop(); }
     topbar(pa > 0.5f ? -1 : 1, -1, red ? vis(t, 1.2f, 5.4f, 0.25f) : 0, red ? 0 : vis(t, 1.2f, 5.4f, 0.25f), 0);
-    press(red ? K_RED : K_GREEN, T(red ? "Settings" : "Search"), vis(t, 0.6f, 1.8f, 0.2f), (t - 1.0f) / 0.35f, SB_W / 2, PRESS_Y);
+    if (ckeys()) press(red ? K_RED : K_GREEN, T(red ? "Settings" : "Search"), vis(t, 0.6f, 1.8f, 0.2f), (t - 1.0f) / 0.35f, SB_W / 2, PRESS_Y);
+    else { press(K_UP, T("Move"), vis(t, 0.2f, 1.0f, 0.2f), (t - 0.4f) / 0.35f, SB_W / 2, PRESS_Y); /* no colour keys: up to the icons, then OK */
+      press(K_OK, T("Settings"), vis(t, 1.0f, 1.9f, 0.2f), (t - 1.1f) / 0.35f, SB_W / 2, PRESS_Y); }
     press(K_BACK, T("Back"), vis(t, 4.7f, 5.8f, 0.2f), (t - 5.0f) / 0.35f, SB_W / 2, PRESS_Y);
   } else if (st == 2) { /* the arrows along the row, then OK opens the title */
     float L = 7.0f; t = fmodf(t, L); int f = t < 0.8f ? 0 : t < 1.6f ? 1 : t < 2.4f ? 2 : 3; float op = vis(t, 3.4f, 6.4f, 0.35f);
@@ -624,7 +630,7 @@ static void notice(float a, const char *s) { /* the app's notice capsule out of 
   if (a <= 0.004f) return; float w = text_width(s, 26, 700, 0) + 46 + 30 + 40, x = 40, y = 12; gfx_opacity_push(a);
   lglass_shell(x, y, 76 + w * a, 76, 38, RGBA(14, 12, 22, 200), 1);
   icon_draw("nav_set", x + 18, y + 18, 40, WHITE_A(255)); text_draw(s, x + 96, y + 38 - text_line_height(26) / 2.0f, 26, 700, WHITE_A(250), 0, 0, ALIGN_LEFT);
-  key_hint(x + 96 + text_width(s, 26, 700, 0) + 20, y + 38, K_RED, NULL, WHITE_A(250), 0); gfx_opacity_pop();
+  key_hint(x + 96 + text_width(s, 26, 700, 0) + 20, y + 38, ckeys() ? K_RED : K_OK, NULL, WHITE_A(250), 0); gfx_opacity_pop();
 }
 static void sc_p2p(int st, float t) {
   if (st == 0) { /* the film is big, the part in memory small and moving along it */
@@ -678,7 +684,7 @@ static void sc_phone(int st, float t) {
   float L = st == 2 ? 6.0f : 5.0f; t = fmodf(t, L);
   int typed = st < 2 ? 0 : t < 0.9f ? 0 : t < 1.2f ? 1 : t < 1.5f ? 2 : t < 1.8f ? 3 : 4; /* (each letter lands 0.3 s after its key) */
   search_page(1, typed, st == 2 ? cl01((t - 2.0f) / 0.8f) : 0, st == 0 ? 0.6f + 0.4f * sinf(t * 4) : st == 1 ? 1 - eo(1.0f, 1.6f, t) * 0.7f : 0); topbar(-1, -1, 0, 1, 0);
-  if (st == 0) { press(K_GREEN, T("Search"), vis(t, 0.3f, 1.6f, 0.2f), (t - 0.6f) / 0.35f, 1300, PRESS_Y); push(0.6f, L, ORB_GREEN, 0.8f); return; }
+  if (st == 0) { press(ckeys() ? K_GREEN : K_OK, T("Search"), vis(t, 0.3f, 1.6f, 0.2f), (t - 0.6f) / 0.35f, 1300, PRESS_Y); push(0.6f, L, ckeys() ? ORB_GREEN : ORB_OK, 0.8f); return; }
   float up = st == 1 ? eo(0, 0.6f, t) : 1, px = SB_W - 140 - 400, py = 250 + (1 - up) * 700 + 6 * sinf(t * 1.6f);
   if (st == 1) { /* the camera's line of sight, from the phone to the code */
     float qx = 96 + 75, qy = 160 + 94 + 6 * 74 + 30 + 75, ex = px + 200, ey = py + 18 + 150 + 115, a = vis(t, 0.5f, 1.6f, 0.2f);
@@ -800,7 +806,7 @@ static void sc_news(float t) {
   support_glass_picture(f > 0.5f && sgT2 ? sgT2 : sgT); support_draw(px + 60, py + 55, Q, sel, 0, W.url, W.urlShown, W.gh, W.ghShown);
 }
 static void scene(int pv, int st, float t) {
-  switch (pv) { case PV_KEYS: sc_keys(st, t); break; case PV_HOLD: sc_hold(st, t); break; case PV_STREAMS: sc_streams(st, t); break; case PV_SUBS: sc_subs(st, t); break;
+  switch (pv) { case PV_KEYS: sc_keys(kst(st), t); break; case PV_HOLD: sc_hold(st, t); break; case PV_STREAMS: sc_streams(st, t); break; case PV_SUBS: sc_subs(st, t); break;
     case PV_P2P: sc_p2p(st, t); break; case PV_PHONE: sc_phone(st, t); break; case PV_YOURKEYS: sc_yourkeys(st + ykOff, t); break; case PV_THANKS: sc_thanks(st, t); break; default: sc_news(t); }
 }
 
@@ -916,7 +922,7 @@ static void close_guide(void) {
    the other, as one animation, round and round; the list follows it */
 static float step_len(int pv, int st) {
   switch (pv) {
-    case PV_KEYS: return st == 3 ? 6.5f : 7.0f;
+    case PV_KEYS: return kst(st) == 3 ? 6.5f : 7.0f;
     case PV_HOLD: return st == 0 ? 5.0f : st == 1 ? 7.0f : 6.0f;
     case PV_STREAMS: return st < 3 ? 5.0f : st == 3 ? 5.6f : 6.0f;
     case PV_SUBS: return st == 1 ? 5.0f : st == 2 ? 7.0f : 8.0f;
@@ -1066,6 +1072,13 @@ static void open_guide(int tour) {
   W.n = 0; W.tour = tour;
   if (tour) { for (int i = 0; i < NTOUR; i++) { Page *pg = &W.p[W.n++]; memset(pg, 0, sizeof *pg); snprintf(pg->title, sizeof pg->title, "%s", TOUR[i].t); snprintf(pg->lead, sizeof pg->lead, "%s", TOUR[i].l);
       for (int b = 0; b < MAXB && TOUR[i].b[b]; b++) { snprintf(pg->b[b], sizeof pg->b[b], "%s", TOUR[i].b[b]); pg->ic[b] = TOUR[i].ic[b]; pg->nb++; } pg->pv = TOUR[i].pv; pg->ctl = TOUR[i].ctl;
+      if (pg->pv == PV_KEYS && !ckeys()) { /* no colour keys: Settings and Search are reached at the top left */
+        snprintf(pg->lead, sizeof pg->lead, "%s", "The arrows, OK and Back take you everywhere.");
+        snprintf(pg->b[0], sizeof pg->b[0], "%s", "Up, then Left: Settings and Search"); pg->ic[0] = "k_up";
+        for (int b = 1; b < 3; b++) { snprintf(pg->b[b], sizeof pg->b[b], "%s", TOUR[i].b[b + 1]); pg->ic[b] = TOUR[i].ic[b + 1]; } pg->nb = 3; }
+#ifdef __ANDROID__
+      if (pg->pv == PV_P2P) pg->nb = 1; /* no USB drive in the Android build */
+#endif
       if (pg->pv == PV_YOURKEYS) { int tm = !tmdb_builtin(), tk = !trakt_builtin(); ykOff = 0; /* (a key this build carries is not asked for: its step goes, and the page with both) */
         if (!tm && !tk) W.n--;
         else if (!tk) { pg->nb = 1; snprintf(pg->lead, sizeof pg->lead, "%s", "Ratings and comments come built in. A TMDB key brings more: OK shows the code. You can always add it later in Settings \xe2\x80\xba Keys."); }

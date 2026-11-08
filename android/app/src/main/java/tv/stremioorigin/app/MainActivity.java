@@ -105,6 +105,10 @@ public class MainActivity extends SDLActivity {
             setenv("TMPDIR", getCacheDir().getAbsolutePath());
             setenv("SB_TVCAPS", Caps.describe(this));
             setenv("SB_TV", isTv() ? "1" : "0");
+            // the red and green keys on some remote or keyboard (Sony, Philips, TCL remotes have them; Google TV and Fire TV ones don't):
+            // the guide names them only then
+            boolean[] ck = android.view.KeyCharacterMap.deviceHasKeys(new int[] { KeyEvent.KEYCODE_PROG_RED, KeyEvent.KEYCODE_PROG_GREEN });
+            setenv("SB_COLORKEYS", ck[0] && ck[1] ? "1" : "0");
             if (BuildConfig.DEV_HOOKS && intent != null && intent.getExtras() != null) {   // dev builds: SB_* from the launch (the tests)
                 Bundle b = intent.getExtras();
                 for (String k : b.keySet()) if (k.startsWith("SB_") || k.equals("LANG")) { Object v = b.get(k); if (v != null) { setenv(k, v.toString()); Log.i(TAG, "dev env " + k + "=" + v); } }

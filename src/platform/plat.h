@@ -42,4 +42,7 @@ void plat_luna_pump(void);
 int plat_luna_send(const char *uri, const char *payload);
 /* the panel's lines (2160 on a 4K TV) from the platform itself, without a system service; 0 when unknown */
 int plat_panel_lines(void);
+/* 1 when the remote has the red and green keys (every LG remote; some Android TV remotes, no Google TV or Fire TV one):
+   the guide and the notices name them only then */
+int plat_color_keys(void);
 #endif

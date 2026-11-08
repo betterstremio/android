@@ -17,6 +17,7 @@
 #include "screens/player.h"
 #include "ui/gfx.h"
 #include "ui/text.h"
+float key_hint(float x, float y, int key, const char *label, uint32_t col, int alignRight); /* (ui/widgets.h: its pill_hide would clash with ours) */
 #include "cJSON.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -304,7 +305,8 @@ void update_pill_draw(float setX) {
   float tx = rtl ? x0 + W - 92 : x0 + 92, kx = rtl ? x0 + 26 : x0 + W - 26 - KEY_W, ky = 50 - KEY_H / 2;
   text_draw(lb, tx, 50 - text_line_height(23) / 2.0f, 23, 600, f ? WHITE_A(255) : WHITE_A(230), 0.1f, 0, rtl ? ALIGN_RIGHT : ALIGN_LEFT);
   if (vw > 0) text_draw(ver, rtl ? tx - tw - 12 : tx + tw + 12, 50 - text_line_height(21) / 2.0f, 21, 600, f ? WHITE_A(220) : WHITE_A(170), 0.2f, 0, rtl ? ALIGN_RIGHT : ALIGN_LEFT);
-  { float br = 0.5f + 0.5f * sinf((float)(now - U.shownAt) * 2.4f); /* the red key, as on the remote: a soft rounded block, two small dots; it glows gently */
+  if (!plat_color_keys()) key_hint(kx + KEY_W / 2 - 18, 50, K_OK, NULL, WHITE_A(235), 0); /* no red key on this remote: OK, once the notice has the highlight */
+  else { float br = 0.5f + 0.5f * sinf((float)(now - U.shownAt) * 2.4f); /* the red key, as on the remote: a soft rounded block, two small dots; it glows gently */
     gfx_shadow(kx, ky + 2, KEY_W, KEY_H, 8, 8, BLACK_A(90)); gfx_rrect(kx, ky, KEY_W, KEY_H, 8, RGB(0xef, 0x3b, 0x3b)); gfx_rrect_v(kx, ky, KEY_W, KEY_H, 8, WHITE_A((int)(40 + 30 * br)), WHITE_A(0));
     gfx_circle(kx + KEY_W / 2 - 7, ky + KEY_H / 2, 2.6f, RGBA(90, 10, 10, 170)); gfx_circle(kx + KEY_W / 2 + 7, ky + KEY_H / 2, 2.6f, RGBA(90, 10, 10, 170)); }
   gfx_opacity_pop();

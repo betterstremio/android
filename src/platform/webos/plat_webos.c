@@ -153,3 +153,4 @@ int plat_panel_lines(void) {
   int w = 0, h = 0; if (!res || !res(&w, &h)) return 0;
   return h;
 }
+int plat_color_keys(void) { return 1; } /* every LG remote has them */

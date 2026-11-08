@@ -126,3 +126,5 @@ void plat_luna_cancel(unsigned long handle) { (void)handle; }
 void plat_luna_pump(void) {}
 int plat_luna_send(const char *uri, const char *payload) { (void)uri; (void)payload; return 0; }
 int plat_panel_lines(void) { SDL_DisplayMode m; if (!SDL_GetDesktopDisplayMode(0, &m)) return m.h; return 0; }
+/* MainActivity asks Android whether any remote or keyboard has the red and green keys (KeyCharacterMap.deviceHasKeys) */
+int plat_color_keys(void) { const char *v = getenv("SB_COLORKEYS"); return v && !strcmp(v, "1"); }
