@@ -52,7 +52,7 @@ void btr_tick(float dt) {
   if (cardScr && !topNav.active && screens[SCR] && screens[SCR]->focused) f = screens[SCR]->focused();
   BgtView v = { app_trailer_idle(), cardScr, f, topNav.active || app_overlay != NULL || /* (a sheet or the long-press menu: it gives way, softly, and none starts under it) */ player_open() || !app_splash_done || saver_on(),
                 board_spot_up(), pace_period() > 21.5 };
-  v.next = cardScr ? board_next_item() : NULL;
+  v.next = cardScr ? board_next_item() : NULL; v.hero = cardScr && board_on_billboard(); v.nnear = cardScr ? board_near_items(v.near, 10) : 0;
   bgt_tick(&v);
   if (B.own && !player_open()) {
     video_pump();
@@ -67,7 +67,7 @@ void btr_tick(float dt) {
       else if (vs == VID_PLAYING) { B.seekWant = 0; B.checkAt = 1; B.steadyAt = 0; fprintf(stderr, "[btr] clip: playing %.2f s after the load, no position yet\n", now - B.loadT); } } /* (some sets report the position only every few seconds: not waited for) */
     if (B.checkAt && video_reported_time() >= 0) { double rep = video_reported_time(); B.checkAt = 0; fprintf(stderr, "[btr] clip: first position %.0f s\n", rep); if (rep < B.loadAt - 30) video_seek_now(bgt_clip_seek(video_duration())); } /* it did begin at the start after all: the jump, late */
     if (!B.live && !B.seekWant && !video_settling() && video_live() && vs == VID_PLAYING) { if (!B.steadyAt) { B.steadyAt = now; card_place(); } } else if (!B.live) B.steadyAt = 0;
-    if (!B.live && B.steadyAt && now - B.steadyAt > (bgt_clip() ? 0.25 : 0.5)) { B.steadyAt = 0; /* (a clip fades in over its first 0.35 s, which covers the frames the TV is late with) */
+    if (!B.live && B.steadyAt && now - B.steadyAt > (bgt_fast() ? 0.25 : 0.5)) { B.steadyAt = 0; /* (a clip fades in over its first 0.35 s, which covers the frames the TV is late with) */
       if (!video_partial_plane()) { fprintf(stderr, "[btr] this TV places the plane full-screen only: no trailer in a card\n"); B.live = 1; bgt_ended(); }
       else if (card_place()) { B.live = 1; /* (the card not open yet: asked again next frame, the video runs on behind the page) */
         if (bgt_state() == BGT_LOAD) { bgt_playing(); CD.on = 1; fprintf(stderr, "[btr] showing %dx%d\n", video_width(), video_height());

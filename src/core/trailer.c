@@ -434,6 +434,95 @@ static void cinemeta_yt(Job *j) {
   cine_next(j);
 }
 
+/* ---- previews: for the cards near the focus, a short clip of the title itself from IMDb, or its trailer -----
+   Asked many titles at a time and before the card is reached, so the address is here when the card opens. Two small
+   requests: which videos a title has (no addresses: a few KB for a whole row), then the addresses of the ones picked.
+   Only videos filed under the title itself and named as a clip or scene of it: IMDb also files its own shows and
+   editorial pieces ("Tom Hardy Through the Years", under one of his films) as clips. Checked on frames of the picks. */
+#define CL_N 96
+#define CL_BATCH 12
+enum { CL_EMPTY, CL_WANT, CL_LIST, CL_PICKED, CL_URLS, CL_READY, CL_NONE };
+typedef struct { char id[16], vid[32], name[64]; int st, run, isClip; double at, retryAt; char *lo, *hi; } ClipE;
+static ClipE CL[CL_N]; static int clListBusy, clUrlBusy;
+static ClipE *cl_find(const char *id) { for (int i = 0; i < CL_N; i++) if (CL[i].id[0] && !strcmp(CL[i].id, id)) return &CL[i]; return NULL; }
+static void cl_reset(ClipE *e) { free(e->lo); free(e->hi); e->lo = e->hi = NULL; e->st = CL_EMPTY; e->vid[0] = 0; e->name[0] = 0; e->run = e->isClip = 0; }
+static ClipE *cl_slot(void) { /* an empty place, else the oldest answer */
+  ClipE *b = NULL; for (int i = 0; i < CL_N; i++) { ClipE *e = &CL[i]; if (!e->id[0]) return e; if ((e->st == CL_READY || e->st == CL_NONE || e->st == CL_EMPTY) && (!b || e->at < b->at)) b = e; }
+  return b;
+}
+static int has_ci(const char *s, const char *w) { size_t n = strlen(w); for (; *s; s++) { size_t i = 0; while (i < n && s[i] && lower((unsigned char)s[i]) == w[i]) i++; if (i == n) return 1; } return 0; }
+static int cl_alnum(int c) { return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9'); }
+static int cl_word(const char *s, const char *w) { size_t n = strlen(w); for (const char *p = s; *p; p++) { size_t i = 0; while (i < n && p[i] && lower((unsigned char)p[i]) == w[i]) i++; if (i == n && (p == s || !cl_alnum((unsigned char)p[-1])) && !cl_alnum((unsigned char)p[n])) return 1; } return 0; }
+static int cl_starts(const char *nm, const char *title) { size_t i = 0; if (!*title) return 0; for (; title[i]; i++) if (lower((unsigned char)nm[i]) != lower((unsigned char)title[i])) return 0; return nm[i] == ':' || (nm[i] == ' ' && nm[i + 1] == '-'); } /* "Title: A Scene" */
+static int cl_episode(const char *nm) { for (const char *p = strchr(nm, '('); p; p = strchr(p + 1, '(')) { int s, e; char c; if (sscanf(p, "(S%d, E%d%c", &s, &e, &c) == 3 && c == ')') return 1; } return 0; } /* "... (S1, E8)": a scene of that episode */
+void trailer_clips_want(const char *imdb) {
+  if (!imdb || !valid_tt(imdb, 5, 10) || strlen(imdb) >= sizeof CL[0].id) return;
+  double t = now_s(); ClipE *e = cl_find(imdb);
+  if (e) {
+    if (e->st == CL_LIST || e->st == CL_PICKED || e->st == CL_URLS) return;
+    if ((e->st == CL_READY && t - e->at < 3 * 3600) || (e->st == CL_NONE && t - e->at < 3600) || (e->st == CL_EMPTY && e->retryAt > t)) return;
+    cl_reset(e);
+  } else { e = cl_slot(); if (!e) return; cl_reset(e); cpy(e->id, sizeof e->id, imdb); }
+  e->retryAt = 0; e->st = CL_WANT; e->at = t;
+}
+int trailer_clip_ready(const char *imdb, int hd, char *url, size_t cap, int *isClip, char *name, size_t ncap) {
+  ClipE *e = imdb ? cl_find(imdb) : NULL; if (!e) return 0;
+  if (e->st == CL_NONE) return -1;
+  if (e->st != CL_READY || now_s() - e->at >= 3 * 3600) return 0; /* (its signed addresses are good for about two days: well inside that) */
+  cpy(url, cap, hd ? e->hi : e->lo); if (isClip) *isClip = e->isClip; if (name) cpy(name, ncap, e->name);
+  return 1;
+}
+/* a title's video to preview: a clip of about a minute, else a trailer */
+static void cl_pick(ClipE *e, const cJSON *title) {
+  const cJSON *ed; int best = 0; e->vid[0] = 0;
+  cJSON_ArrayForEach(ed, js_arr(js_obj(title, "primaryVideos"), "edges")) {
+    const cJSON *n = js_obj(ed, "node"); if (!n || strcmp(js_str(js_obj(n, "primaryTitle"), "id", ""), e->id)) continue;
+    const char *ct = js_str(js_obj(n, "contentType"), "id", ""), *nm = js_str(js_obj(n, "name"), "value", ""), *vid = js_str(n, "id", "");
+    int run = (int)js_num(js_obj(n, "runtime"), "value", 0), clip = strstr(ct, "clip") != NULL, sc = 0;
+    if (!*vid || strlen(vid) >= sizeof e->vid || has_ci(nm, "subtitled") || has_ci(nm, "dubbed") || has_ci(nm, "interview") || has_ci(nm, "featurette") || has_ci(nm, "behind the") || has_ci(nm, "blu-ray") || has_ci(nm, "announcement")) continue;
+    if (clip && !has_ci(nm, "trailer") && run >= 20 && run <= 180 && (cl_word(nm, "clip") || cl_word(nm, "scene") || cl_episode(nm) || cl_starts(nm, js_str(js_obj(title, "titleText"), "text", "")))) sc = 1000 - abs(run - 60);
+    else if (strstr(ct, "trailer") && run >= 30 && run <= 240) sc = 500 + (has_ci(nm, "official") ? 20 : 0);
+    if (sc > best) { best = sc; cpy(e->vid, sizeof e->vid, vid); cpy(e->name, sizeof e->name, nm); e->run = run; e->isClip = clip; }
+  }
+  e->st = best ? CL_PICKED : CL_NONE; e->at = now_s();
+  fprintf(stderr, "[clips] %s -> %s\n", e->id, best ? e->name : "nothing to preview");
+}
+static void cl_done_all(int from, int answered) { double t = now_s(); for (int i = 0; i < CL_N; i++) if (CL[i].st == from) { if (answered) { CL[i].st = CL_NONE; CL[i].at = t; } else { CL[i].st = CL_EMPTY; CL[i].at = t; CL[i].retryAt = t + 20; } } }
+static void on_cl_list(int st, const unsigned char *body, size_t len, void *ud) {
+  (void)len; (void)ud; clListBusy = 0; cJSON *r = st > 0 ? net_json(body) : NULL; const cJSON *ts = js_arr(js_obj(r, "data"), "titles"), *x;
+  if (ts) cJSON_ArrayForEach(x, ts) { ClipE *e = cl_find(js_str(x, "id", "")); if (e && e->st == CL_LIST) cl_pick(e, x); }
+  if (!ts) fprintf(stderr, "[clips] list failed (HTTP %d)\n", st);
+  cl_done_all(CL_LIST, ts != NULL); cJSON_Delete(r);
+}
+static void on_cl_urls(int st, const unsigned char *body, size_t len, void *ud) {
+  (void)len; (void)ud; clUrlBusy = 0; cJSON *r = st > 0 ? net_json(body) : NULL; const cJSON *vs = js_arr(js_obj(r, "data"), "videos"), *x;
+  if (vs) cJSON_ArrayForEach(x, vs) { const char *vid = js_str(x, "id", ""); ClipE *e = NULL; for (int i = 0; i < CL_N && !e; i++) if (CL[i].st == CL_URLS && !strcmp(CL[i].vid, vid)) e = &CL[i]; if (!e) continue;
+    const char *p480 = "", *sd = "", *p720 = "", *p1080 = ""; const cJSON *pu;
+    cJSON_ArrayForEach(pu, js_arr(x, "playbackURLs")) { const char *d = js_str(pu, "videoDefinition", ""), *u = js_str(pu, "url", ""); if (strcmp(js_str(pu, "mimeType", ""), "video/mp4") || !*u) continue;
+      if (!strcmp(d, "DEF_480p")) p480 = u; else if (!strcmp(d, "DEF_SD")) sd = u; else if (!strcmp(d, "DEF_720p")) p720 = u; else if (!strcmp(d, "DEF_1080p")) p1080 = u; }
+    const char *lo = *p480 ? p480 : *sd ? sd : *p720 ? p720 : p1080, *hi = *p720 ? p720 : *p1080 ? p1080 : lo; /* (MP4s that open with their index: the TV starts from the first bytes, no seek) */
+    if (!*lo) { e->st = CL_NONE; e->at = now_s(); continue; }
+    e->lo = strdup(lo); e->hi = strdup(hi); e->st = CL_READY; e->at = now_s(); }
+  if (!vs) fprintf(stderr, "[clips] addresses failed (HTTP %d)\n", st);
+  cl_done_all(CL_URLS, vs != NULL); cJSON_Delete(r);
+}
+static void cl_post(const char *q, NetCb cb) {
+  cJSON *b = cJSON_CreateObject(); cJSON_AddStringToObject(b, "query", q); char *body = cJSON_PrintUnformatted(b); cJSON_Delete(b);
+  net_post_bg(IMDB_GQL, body, "application/json", "x-imdb-client-name: imdb-web-next\nUser-Agent: Mozilla/5.0", 8000, cb, NULL); free(body);
+}
+static void cl_pump(void) {
+  double t = now_s(); int wants = 0, picked = 0;
+  for (int i = 0; i < CL_N; i++) { if (CL[i].st == CL_WANT) { if (t - CL[i].at > 5) CL[i].st = CL_EMPTY; else wants++; } else if (CL[i].st == CL_PICKED) picked++; } /* (scrolled past long ago: not asked) */
+  if (wants && !clListBusy) { char ids[CL_BATCH * 20 + 8], q[CL_BATCH * 20 + 200]; int n = 0, at = 0;
+    for (; n < CL_BATCH; n++) { ClipE *b = NULL; for (int i = 0; i < CL_N; i++) if (CL[i].st == CL_WANT && (!b || CL[i].at > b->at)) b = &CL[i]; if (!b) break; b->st = CL_LIST; at += snprintf(ids + at, sizeof ids - at, "%s\"%s\"", n ? "," : "", b->id); } /* the latest asked go first */
+    snprintf(q, sizeof q, "query{titles(ids:[%s]){id titleText{text} primaryVideos(first:50){edges{node{id name{value} runtime{value} contentType{id} primaryTitle{id}}}}}}", ids);
+    clListBusy = 1; cl_post(q, on_cl_list); }
+  if (picked && !clUrlBusy) { char ids[CL_BATCH * 36 + 8], q[CL_BATCH * 36 + 200]; int n = 0, at = 0;
+    for (int i = 0; i < CL_N && n < CL_BATCH; i++) if (CL[i].st == CL_PICKED) { CL[i].st = CL_URLS; at += snprintf(ids + at, sizeof ids - at, "%s\"%s\"", n ? "," : "", CL[i].vid); n++; }
+    snprintf(q, sizeof q, "query{videos(ids:[%s]){id playbackURLs{url mimeType videoDefinition}}}", ids);
+    clUrlBusy = 1; cl_post(q, on_cl_urls); }
+}
+
 /* ---- the API ----------------------------------------------------------------------------------------- */
 unsigned trailer_find(const char *imdbId, const char *ytIds, int lowQuality, TrailerCb cb, void *ud) {
   Job *j = calloc(1, sizeof *j); j->tok = nextTok++; j->lq = !!lowQuality; j->cb = cb; j->ud = ud; j->refs = 1; j->next = jobs; jobs = j;
@@ -466,6 +555,7 @@ unsigned trailer_find_meta(const cJSON *meta, const char *id, int lowQuality, Tr
 }
 void trailer_cancel(unsigned tok) { for (Job *j = jobs; j; j = j->next) if (j->tok == tok) j->cancelled = 1; }
 void trailer_tick(void) {
+  cl_pump();
   if (!jobs) return;
   double t = now_s();
   for (Job *j = jobs, *n; j; j = n) {

@@ -20,6 +20,8 @@ int    img_palette(const char *url, int w, int h, int alpha, Palette *out); /* 1
 int    img_failed(const char *url);      /* 1 when the picture could not be loaded */
 int    img_loaded(const char *url);      /* 1 when ready */
 const char *img_src_of(GLuint tex);     /* the address a plain picture was loaded from, or NULL */
+void   img_urgent_shaped(const char *url, int w, int h, float radius, int fit); /* the picture the screen waits on, ahead of the queue */
+int    img_has_room(void);
 void   img_prefetch(const char *url, int w, int h);
 int    img_budget_mb(void);           /* the picture memory allowed (small on most TVs) */
 void   img_urgent(const char *url, int w, int h);       /* the next one decoded (the backdrop waited on) */

@@ -18,6 +18,7 @@ unsigned net_size(const char *url, NetCb cb, void *ud);
    asked ahead, the player then gets an address that answers at once); body = that address, status = its answer */
 unsigned net_resolve(const char *url, NetCb cb, void *ud);   /* (on the previews' lane) */
 /* a GET on the previews' lane: workers of their own, so a card's preview never holds up a title page */
+unsigned net_post_bg(const char *url, const char *body, const char *contentType, const char *headers, int timeoutMs, NetCb cb, void *ud); /* (a POST on the previews' lane) */
 unsigned net_get_bg(const char *url, int timeoutMs, NetCb cb, void *ud);
 unsigned net_get_hdr(const char *url, const char *extraHeader, NetCb cb, void *ud);  /* several: one per line */
 unsigned net_post_json(const char *url, const char *json, NetCb cb, void *ud);

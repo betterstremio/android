@@ -1,5 +1,7 @@
 #include <ctype.h>
 #include "core/stremio.h"
+#include "core/bgtrailer.h"
+#include <strings.h>
 #include "core/net.h"
 #include "core/store.h"
 #include "core/json.h"
@@ -294,6 +296,8 @@ const char *sb_bg_mid(const Item *it, char *buf, size_t cap) { bg_of(it, buf, ca
   if (find_in(buf, "images.metahub.space/background/")) { const char *k[] = { "/background/small/", "/background/large/" }; for (int i = 0; i < 2; i++) replace_in(buf, cap, k[i], "/background/medium/"); }
   else if (find_in(buf, "image.tmdb.org/t/p/")) replace_in(buf, cap, "/t/p/original/", "/t/p/w1280/");
   return buf; }
+/* a card open wide (800 px): TMDB's 780 px picture, a third of the pixels of 1280 to fetch and decode */
+const char *sb_bg_card(const Item *it, char *buf, size_t cap) { sb_bg_mid(it, buf, cap); if (find_in(buf, "image.tmdb.org/t/p/")) replace_in(buf, cap, "/t/p/w1280/", "/t/p/w780/"); return buf; }
 const char *sb_bg_large(const Item *it, char *buf, size_t cap) { bg_of(it, buf, cap);
   if (find_in(buf, "images.metahub.space/background/")) { const char *k[] = { "/background/small/", "/background/medium/" }; for (int i = 0; i < 2; i++) replace_in(buf, cap, k[i], "/background/large/"); }
   else if (find_in(buf, "image.tmdb.org/t/p/")) { const char *k[] = { "/t/p/w300/", "/t/p/w500/", "/t/p/w780/", "/t/p/w1280/" }; for (int i = 0; i < 4; i++) replace_in(buf, cap, k[i], "/t/p/original/"); }
@@ -673,6 +677,9 @@ static int stream_parse(Stream *o, const cJSON *s, const char *addon) {
   const cJSON *subs = js_arr(s, "subtitles"); o->nsubs = subs ? cJSON_GetArraySize(subs) : 0; if (o->nsubs) stream_subs_keep(o->url[0] ? o->url : o->ext, subs, addon);
   return 1;
 }
+/* an addon saying its rate limit is reached, as a stream entry (ElfHosted's "public rate-limit exceeded") */
+static int ci_has(const char *s, const char *w) { size_t n = strlen(w); for (; *s; s++) if (!strncasecmp(s, w, n)) return 1; return 0; }
+int sb_stream_is_limit(const Stream *s) { const char *f[] = { s->name, s->title, s->filename }; for (int i = 0; i < 3; i++) if (ci_has(f[i], "rate-limit") || ci_has(f[i], "rate limit") || ci_has(f[i], "too many requests")) return 1; return 0; }
 typedef struct { unsigned tok; int pending, total, cancelled, count; StreamPartCb part; StreamDoneCb done; StreamAnsCb ans; void *ud; cJSON *own; int bg, nids; unsigned ids[24]; } StreamReq;
 /* previews: the requests still out (to cancel), and the addons that gave no answer twice running (left out 10 min) */
 static StreamReq *bgLive[8]; static int bgReq;
@@ -691,6 +698,7 @@ static void streams_answer(StreamPart *p, const cJSON *arr) {
   StreamGroup g; copy_str(g.name, sizeof g.name, p->name); int na = arr ? cJSON_GetArraySize(arr) : 0; if (!r->ans && na > 40) na = 40; /* the best-stream pick reads all of them, as the web does: a 4K-first addon lists its 1080p files late */
   g.items = calloc(na ? na : 1, sizeof(Stream)); g.n = 0;
   if (arr) cJSON_ArrayForEach(s, arr) { if (g.n >= na) break; if (stream_parse(&g.items[g.n], s, p->name)) g.n++; }
+  for (int i = 0; i < g.n; i++) if (sb_stream_is_limit(&g.items[i])) { bgt_addons_limited(p->name, "said so in its list"); break; }
   r->total += g.n; if (g.n) r->part(&g, p->idx, r->ud); else free(g.items);
 }
 static void stream_part_done(StreamPart *p) {
@@ -701,6 +709,7 @@ static void stream_part_done(StreamPart *p) {
 }
 static void on_streams(int st, const unsigned char *b, size_t n, void *ud) {
   StreamPart *p = ud; StreamReq *r = p->req;
+  if (st == 429) bgt_addons_limited(p->name, "HTTP 429");
   if (r->bg && st != -1) addon_outcome(p->name, st == 200);
   if (!r->cancelled) { cJSON *j = st == 200 ? net_json(b) : NULL;
     if (st != 200 || !j) fprintf(stderr, "[addon] streams from %s: %s%s\n", p->name, st == 200 ? "not JSON" : st > 0 ? "HTTP error" : "no answer", r->bg ? " (preview)" : "");

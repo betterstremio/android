@@ -225,19 +225,22 @@ GLuint img_get(const char *url, int w, int h, float *aspect) {
   if (aspect) *aspect = im->aspect > 0 ? im->aspect : (float)w / h;
   return im->tex;
 }
-void img_prefetch(const char *url, int w, int h) { if (url && *url && usedBytes < budgetBytes * 85 / 100) request(url, w, h); } /* looking ahead only while there is room: it never pushes out what is on screen */
+int img_has_room(void) { return usedBytes < budgetBytes / 100 * 85; } /* (divided first: times 85 overflows a 32-bit long, and the answer was always no) */
+void img_prefetch(const char *url, int w, int h) { if (url && *url && img_has_room()) request(url, w, h); } /* looking ahead only while there is room: it never pushes out what is on screen */
 /* the address a plain picture on the screen was loaded from (the player shows the very logo the page showed) */
 const char *img_src_of(GLuint tex) { if (!tex) return NULL; for (int b = 0; b < BUCKETS; b++) for (Img *i = table[b]; i; i = i->next) if (i->tex == tex && i->fit < 0) return i->src; return NULL; }
 /* the picture the screen is waiting on (the backdrop of the focused title): out of the stacks into the slot taken
    next, so a fast scroll's posters, asked after it, never hold it back; the one it replaces goes back on top */
-void img_urgent(const char *url, int w, int h) {
-  if (!url || !*url) return; Img *im = request(url, w, h); im->urgent = 1; if (im->state != 0 || im == urg) return;
+static void urgent_move(Img *im) {
+  im->urgent = 1; if (im->state != 0 || im == urg) return;
   pthread_mutex_lock(&mu);
   int found = 0; for (int i = sn - 1; i >= 0 && !found; i--) if (stk[i] == im) { memmove(stk + i, stk + i + 1, (size_t)(sn - i - 1) * sizeof *stk); sn--; found = 1; }
   for (int i = psn - 1; i >= 0 && !found; i--) if (pstk[i] == im) { memmove(pstk + i, pstk + i + 1, (size_t)(psn - i - 1) * sizeof *pstk); psn--; found = 1; }
   if (found) { if (urg) { if (sn < 1024) stk[sn++] = urg; else pstk[psn++] = urg; } urg = im; } /* (a picture already taken by a worker is not in them: nothing to do) */
   pthread_mutex_unlock(&mu);
 }
+void img_urgent(const char *url, int w, int h) { if (url && *url) urgent_move(request(url, w, h)); }
+void img_urgent_shaped(const char *url, int w, int h, float radius, int fit) { if (!url || !*url || w <= 0 || h <= 0) return; char k[2300]; urgent_move(request_as(shaped_key(k, sizeof k, url, w, h, radius, fit), url, w, h, fit, radius)); }
 /* title art: decoded before the posters waiting in the queue, and kept */
 void img_prefetch_pri(const char *url, int w, int h) {
   if (!url || !*url) return; Img *im = find(url, fnv(url));

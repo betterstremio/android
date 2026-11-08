@@ -25,8 +25,10 @@ You bring your own Stremio account and your own addons. The app ships empty, hos
 - A cinematic layout where cards open wide as you rest on them, or a Classic layout if you prefer it
 
 **Previews**
-- Rest on a card and it plays: the title itself, past its opening credits, or its trailer. Or turn previews off
-- Clips are silent, kept to small SDR links so the TV never switches picture mode, and stop after 30 seconds
+- Rest on a card and a short clip plays, about a minute long with sound. Clips and trailers come from IMDb. A title with no clip plays its trailer. Or turn previews off
+- Short clips and trailers ask your stream addons for nothing, so they work with any setup
+
+Settings > For You > Preview on focus also offers The title itself: the film, past its opening credits, silent, for 30 seconds. **Only use it with a self-hosted AIOStreams or another provider with no public rate limit.** The app asks you to confirm before turning it on. If an addon reports that its rate limit is reached, previews use IMDb for the next 30 minutes. It asks your addons for links as soon as you pause on a card, the same request Play makes, and public instances count those requests. ElfHosted's free addons give each internet connection 100, then one more a minute, and once they run out the stream list only shows a "rate-limit exceeded" entry, so films you actually want to watch stop playing too. If you host AIOStreams yourself, set `DISABLE_RATE_LIMITS=true`, because by default it allows 10 stream requests every 15 seconds. Your debrid service has its own limits either way.
 
 **Watching**
 - The best stream for your device and connection, picked in one press

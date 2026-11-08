@@ -28,6 +28,10 @@ unsigned trailer_find(const char *imdbId, const char *ytIds, int lowQuality, Tra
 /* the same from a title's metadata (meta may be NULL: then the id alone) */
 unsigned trailer_find_meta(const cJSON *meta, const char *id, int lowQuality, TrailerCb cb, void *ud);
 void     trailer_cancel(unsigned tok);   /* its callback never runs */
+/* previews: these titles' clips looked up ahead, many at a time (imdb: "tt..."; asking again costs nothing) */
+void     trailer_clips_want(const char *imdb);
+/* 1: its short clip or trailer is known (hd: 720p, else 480p; an MP4 to play from its start); 0: not yet; -1: IMDb has none */
+int      trailer_clip_ready(const char *imdb, int hd, char *url, size_t cap, int *isClip, char *name, size_t ncap);
 void     trailer_tick(void);             /* once a frame: deadlines and retries */
 
 /* a Trailer button / menu entry is offered: an IMDb id or YouTube ids exist */

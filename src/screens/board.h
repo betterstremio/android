@@ -8,6 +8,8 @@ void tabs_warm_tick(void);    /* after start: the other tabs' first screens made
 void board_invalidate(void);    /* the library changed: Home and Library rebuild when shown */
 void board_rebuild(void);       /* the board on screen reloads its rows in place, focus kept */
 int  board_spot_up(void);
+int  board_on_billboard(void);       /* the focus is on Home's cinematic billboard */
+int  board_near_items(const Item **out, int max); /* the cards around the focus: same row, the rows above and below */
 const Item *board_next_item(void);   /* the card right of the focus on Home / Discover, NULL when none */
 void board_col_tick(void);      /* an export the phone sent: taken in, Home rebuilt */
 unsigned board_col_gen(void);   /* how many times the collections have changed */

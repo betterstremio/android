@@ -23,6 +23,8 @@ typedef struct {
   int   spotlight;      /* Discover's spotlight is showing: it moves on by itself */
   int   shedding;       /* frames run late (the pace stepped down): no trailer for now */
   const Item *next;     /* the card to the right of the focus (a clip's link is made ready ahead), NULL when none */
+  const Item *near[10]; int nnear; /* the cards around it (their clips are looked up ahead) */
+  int   hero;           /* it plays in the billboard: the larger picture */
 } BgtView;
 
 typedef struct {
@@ -39,6 +41,8 @@ void bgt_release_now(void);         /* the player is about to load: hidden and u
 void bgt_playing(void);             /* the backend shows its first frame */
 void bgt_ended(void);               /* it ended or failed */
 BgtState bgt_state(void);
+void   bgt_addons_limited(const char *addon, const char *how); /* an addon said its rate limit is reached: its previews pause, IMDb plays instead */
+int    bgt_fast(void);              /* the title or an IMDb clip: shown as soon as it plays steadily */
 int    bgt_clip(void);              /* what loads is the title itself (not a trailer): silent, started past the credits */
 double bgt_clip_seek(double dur);   /* where a clip starts, once its length is known */
 double bgt_clip_start(void);        /* where a clip is asked to begin before its length is known */

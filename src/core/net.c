@@ -208,6 +208,7 @@ unsigned net_get_hdr(const char *url, const char *hdr, NetCb cb, void *ud) { ret
 unsigned net_size(const char *url, NetCb cb, void *ud) { return enqueue_x(url, NULL, NULL, NULL, 10000, 1, cb, ud); }
 unsigned net_resolve(const char *url, NetCb cb, void *ud) { bgNext = 1; return enqueue_x(url, NULL, NULL, NULL, 10000, 2, cb, ud); }
 unsigned net_get_bg(const char *url, int timeoutMs, NetCb cb, void *ud) { bgNext = 1; return enqueue_x(url, NULL, NULL, NULL, timeoutMs, 0, cb, ud); }
+unsigned net_post_bg(const char *url, const char *body, const char *contentType, const char *headers, int timeoutMs, NetCb cb, void *ud) { bgNext = 1; return enqueue_c(url, headers, body ? body : "", contentType ? contentType : "", timeoutMs, cb, ud); }
 unsigned net_post_json(const char *url, const char *json, NetCb cb, void *ud) { return enqueue(url, NULL, json, cb, ud); }
 unsigned net_post_hdr_t(const char *url, const char *body, const char *contentType, const char *headers, int timeoutMs, NetCb cb, void *ud) {
   return enqueue_c(url, headers, body ? body : "", contentType ? contentType : "", timeoutMs, cb, ud);

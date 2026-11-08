@@ -29,6 +29,7 @@
 #include "ui/qrcard.h"
 #include "core/update.h"
 #include "screens/logcard.h"
+#include "screens/confirmcard.h"
 #include "screens/welcome.h"
 #include "ui/qr.h"
 #include "ui/support.h"
@@ -117,7 +118,7 @@ static int lang_opts(void) {
   return 2;
 }
 /* For You: recommendations on Home (core/recs.c); every row is a store key recs.c and Home watch, so a change applies at once */
-static const Opt PREV[] = { { "clip", "The title itself" }, { "trailer", "Trailer" }, { "off", "Off" } };
+static const Opt PREV[] = { { "imdb", "Short clips" }, { "trailer", "Trailer" }, { "off", "Off" }, { "title", "The title itself" } }; /* (The title itself last: flicking through the values does not stop on its warning) */
 static const Opt HLAY[] = { { "cinematic", "Cinematic" }, { "classic", "Classic" } };
 static const Opt RLANG[] = { { "", "Automatic" }, { "hi,en", "Hindi and English" }, { "en", "English" }, { "hi", "Hindi" }, { "ta,en", "Tamil and English" }, { "te,en", "Telugu and English" },
   { "ml,en", "Malayalam and English" }, { "pa,hi,en", "Punjabi, Hindi and English" }, { "es,en", "Spanish and English" }, { "fr,en", "French and English" }, { "ko,en", "Korean and English" }, { "ja,en", "Japanese and English" } };
@@ -130,8 +131,8 @@ static int recs_opts(void) {
     for (int i = 0; i < recs_region_count() && k < 40; i++) { snprintf(s->dynS[k], 64, "%s", recs_region_code(i)); s->dyn[k].v = s->dynS[k]; s->dyn[k].lb = recs_region_name(recs_region_code(i)); k++; }
     s->opts = s->dyn; s->nopts = k; }
   set_s(&recsS[n++], "recsLangs", "Languages", "Automatic: your region's, plus what you watch a lot", RLANG, (int)(sizeof RLANG / sizeof RLANG[0]), "");
-  set_s(&recsS[n++], "bgPreview", "Preview on focus", "Rest on a card: the title itself, past its opening credits, or its trailer", PREV, 3,
-        strcmp(store_get("bgTrailer", "true"), "false") ? "clip" : "off");
+  set_s(&recsS[n++], "bgPreview", "Preview on focus", "Short clips and trailers come from IMDb and work with any addons. The title itself needs a self-hosted AIOStreams or another provider with no rate limit", PREV, 4,
+        strcmp(store_get("bgTrailer", "true"), "false") ? "imdb" : "off");
   set_s(&recsS[n++], "recsHideCinema", "Hide films still in cinemas", "Leaves out films out less than 30 days ago", OO, 2, "false");
   set_s(&recsS[n++], "recsPaused", "Pause history", "What you watch from now on is not used for picks", OO, 2, "false");
   set_act(&recsS[n++], "__recsNow", "Refresh picks now", "Ask TMDB again with your latest watching");
@@ -283,7 +284,12 @@ static void ab_tick(void) {
   else snprintf(d, sizeof d, "%s", T("Play starts the best stream for this TV and your internet speed"));
   if (strcmp(playBase[4].ds, d)) { snprintf(playBase[4].ds, sizeof playBase[4].ds, "%s", d); playBase[4].raw = 0; play_layout(); S.dirty = 1; }
 }
+static void set_val(Setting *o, const char *v, int dir);
+static struct { Setting *o; int dir, ok; } titleAsk;
+static void on_title_warned(int yes, void *ud) { (void)ud; if (!yes || !titleAsk.o) return; titleAsk.ok = 1; set_val(titleAsk.o, "title", titleAsk.dir); titleAsk.ok = 0; }
 static void set_val(Setting *o, const char *v, int dir) {
+  if (!strcmp(o->k, "bgPreview") && !strcmp(v, "title") && !titleAsk.ok) { /* its cost is said before it is on: the choice stays with the viewer */
+    titleAsk.o = o; titleAsk.dir = dir; confirm_show(T("Use your addons for previews?"), T("Previews from your addons can use up your rate limit on public services, and films may stop playing until it refills. Use this only with a self-hosted AIOStreams or a provider with no limit."), T("Use it anyway"), T("Cancel"), on_title_warned, NULL); return; }
   if (strcmp(store_get(o->k, o->d ? o->d : ""), v)) { sound_play(SND_TOGGLE); orbs_pulse(ORB_DONE, is_switch(o) ? 0.45f : 0.3f); } /* a switch or a choice: its own tone, and the glows feel it */
   if (!strcmp(o->k, "autoBest") && !strcmp(v, "true") && !best_on()) { if (!best_speed_busy()) { best_caps_probe(NULL, NULL); best_speed_run(on_speed, NULL); } return; }
   if (!strcmp(o->k, "uiLang")) { if (strcmp(v, store_get("uiLang", "auto"))) { store_set("uiLang", v); i18n_init(plat_asset_dir(), v); text_set_rtl(i18n_rtl()); text_gc(); board_invalidate();
@@ -309,7 +315,7 @@ static float right_w(const Setting *o, int focused) { /* what sits right of the 
 #define DS_PX 26     /* a setting's description: 26 px on 34 px lines, at most 3 lines */
 #define DS_LH 34.0f
 /* the words under a row: only About's rows and the best stream's (its connection measured) keep them */
-static int keep_ds(const Setting *o) { return (o >= supS && o < supS + sizeof supS / sizeof *supS) || !strcmp(o->k, "autoBest"); }
+static int keep_ds(const Setting *o) { return (o >= supS && o < supS + sizeof supS / sizeof *supS) || !strcmp(o->k, "autoBest") || !strcmp(o->k, "bgPreview"); } /* (bgPreview: its warning about rate limits has to be read) */
 static int ds_lines(const Setting *o) { if (!o->ds[0] || !keep_ds(o)) return 0; int n = text_wrap_count(o->raw ? o->ds : T(o->ds), CLW - 48 - right_w(o, 0), 3, DS_PX, 400, 0); return n < 1 ? 1 : n; }
 static unsigned hash_s(const char *s, unsigned h) { while (*s) h = h * 31 + (unsigned char)*s++; return h; }
 /* what a row draws beside its words, measured once: again when the layout is redone, its value or the language

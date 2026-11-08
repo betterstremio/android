@@ -63,6 +63,7 @@ void sb_fill_item(Item *it, const cJSON *m, const char *type);
 const char *sb_poster_of(const Item *it, char *buf, size_t cap);
 const char *sb_bg_small(const Item *it, char *buf, size_t cap);
 const char *sb_bg_mid(const Item *it, char *buf, size_t cap);
+const char *sb_bg_card(const Item *it, char *buf, size_t cap);
 const char *sb_bg_large(const Item *it, char *buf, size_t cap); /* the largest there is: for a picture drawn nearly full screen */
 const char *sb_logo_of(const Item *it, char *buf, size_t cap);
 int  sb_is_imdb(const char *id);
@@ -106,6 +107,7 @@ typedef void (*StreamDoneCb)(int total, void *ud);
 unsigned sb_streams(const char *type, const char *vid, StreamPartCb part, StreamDoneCb done, void *ud);
 /* a preview's lookup: on the previews' own network lane, 5 s per addon, addons that keep failing left out for a while,
    and cancellable (the card left: what is still out stops) */
+int  sb_stream_is_limit(const Stream *s); /* the entry is an addon saying its rate limit is reached */
 unsigned sb_streams_bg(const char *type, const char *vid, StreamPartCb part, StreamDoneCb done, void *ud);
 void     sb_streams_cancel(unsigned tok);
 /* the same, also told after each answer how many addons are still out of how many (the "waiting for N addons" line) */

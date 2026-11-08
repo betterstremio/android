@@ -5,6 +5,8 @@
 #include "core/best.h"
 #include "core/stremio.h"
 #include "platform/mem.h"
+#include "core/app.h"
+#include "core/i18n.h"
 #include <stdio.h>
 #include <stdint.h>
 #include <string.h>
@@ -26,6 +28,10 @@ static double lastCheck, hiddenAt, memAt; static char tid[64], ttype[16];
    The pick is the clip's own (not the Play button's best-for-this-TV choice): links as each addon answers, a small SDR
    one (720p first, 1080p next, never 4K or HDR / Dolby Vision: the TV would switch its picture mode for a preview),
    done as soon as a 720p one is in or 0.7 s after the first answer. */
+/* quick: a short clip or trailer from IMDb (Preview on focus, the default): no addon is asked, its address is looked up ahead (trailer.c), it plays from its first frame with its sound */
+#define QUICK_IDLE 0.40f   /* the moment the card has opened */
+#define QUICK_SECONDS 75
+static int quick; static char qFocus[64]; static double qLoadAt;
 static int clip; static double clipFrac, clipAbs, showAt, settleAt;
 #define CLIP_SECONDS 30
 #define CLIP_IDLE 1.0f      /* a clip starts this long after the remote rests (a trailer: 3 s) */
@@ -41,8 +47,17 @@ static ClipPick SL[2]; /* 0: the card in focus; 1: the one to its right, made re
 #define CP SL[0]
 static unsigned pgen;
 static struct { char id[64], url[SB_URL_MAX], addon[96], label[160]; int score; double at, frac, abs; } CC[12]; static int ccNext; /* resolved links, an hour each */
-static const char *preview_mode(void) { const char *m = store_get("bgPreview", ""); if (m[0]) return m; return strcmp(store_get("bgTrailer", "true"), "false") ? "clip" : "off"; }
+#define LIMIT_PAUSE (30 * 60) /* an addon said its rate limit is reached: this many seconds of IMDb previews, so what is left goes to playing films */
+static double limitUntil; static double now_s(void);
+static const char *preview_mode(void) { const char *m = store_get("bgPreview", ""); if (!strcmp(m, "clip")) { store_set("bgPreview", "imdb"); return "imdb"; } /* (2.0.0's default, saved by anyone who touched the row: on public addons it used up the requests needed to play. Chosen again now, it is stored as "title") */ if (!strcmp(m, "title") && limitUntil > 0 && now_s() < limitUntil) return "imdb"; if (m[0]) return m; return strcmp(store_get("bgTrailer", "true"), "false") ? "imdb" : "off"; }
+void bgt_addons_limited(const char *addon, const char *how) {
+  double t = now_s(); int was = limitUntil > 0 && t < limitUntil; limitUntil = t + LIMIT_PAUSE;
+  if (was || strcmp(store_get("bgPreview", ""), "title")) return;
+  fprintf(stderr, "[btr] rate limit from %s (%s): addon previews paused for %d min, IMDb instead\n", addon, how, LIMIT_PAUSE / 60);
+  toast(T("Your addon reached its rate limit. Previews use IMDb for the next 30 minutes"), 5000, NULL);
+}
 int bgt_clip(void) { return clip; }
+int bgt_fast(void) { return clip || quick; }
 double bgt_clip_seek(double dur) { if (dur <= 0) return 0; double t = clipAbs > 0 ? clipAbs : dur * clipFrac; if (t > dur * 0.5) t = dur * 0.3; return t; }
 double bgt_clip_start(void) { return clipAbs > 0 ? clipAbs : 1080; } /* (a series: its fixed place; a film: 18 minutes, 15% of a two-hour one) */
 static double now_s(void) { struct timespec t; clock_gettime(CLOCK_MONOTONIC, &t); return t.tv_sec + t.tv_nsec / 1e9; }
@@ -68,6 +83,7 @@ void bgt_release_now(void) {
 void bgt_key(void) { if (idleOn || st != S_OFF) { if (st == S_LOAD || st == S_SHOW) fprintf(stderr, "[btr] stop: input\n"); idleOn = 0; stop_soft(); } }
 void bgt_playing(void) {
   if (st != S_LOAD) return; st = S_SHOW; showAt = now_s();
+  if (quick && settleAt > 0) fprintf(stderr, "[btr] clip sli %.2f s from settling (link picked %.2f, resolved %.2f)\n", showAt - settleAt, qLoadAt - settleAt, qLoadAt - settleAt);
   if (clip && settleAt > 0) fprintf(stderr, "[btr] clip sli %.2f s from settling (link picked %.2f, resolved %.2f)\n", showAt - settleAt,
                                     CP.pickAt > 0 ? CP.pickAt - settleAt : -1, CP.resolvedAt > 0 ? CP.resolvedAt - settleAt : -1);
 }
@@ -89,6 +105,7 @@ static void on_meta(cJSON *m, void *ud) {
 }
 /* a link's worth for a preview: -1 unusable; else higher is better (720p SDR, cached, small) */
 static int clip_score(const Stream *s) {
+  if (sb_stream_is_limit(s)) return -1; /* (its link plays the message) */
   if (s->p2p || strncmp(s->url, "http", 4) || s->hdrs[0] || s->ext[0]) return -1;
   char lb[1100]; snprintf(lb, sizeof lb, "%s %s %s", s->name, s->title, s->filename);
   char hdr[64]; best_hdr_of(lb, hdr, sizeof hdr); if (hdr[0]) return -1;            /* HDR / Dolby Vision: the TV changes mode */
@@ -158,13 +175,15 @@ static void clip_go(double t) {
   st = S_LOAD; memAt = t + 10; fprintf(stderr, "[btr] clip %s, %s link from %s: %s, %d MB free\n", tid, CP.resolved ? "resolved" : "unresolved", CP.addon, CP.label, plat_mem_free_mb());
   if (H.load) H.load(u, "", tid, H.ud);
 }
-static int clip_for(const Item *it) { return it && !strcmp(preview_mode(), "clip") && !strncmp(it->id, "tt", 2) && (!strcmp(it->type, "movie") || !strcmp(it->type, "series")); }
+static int imdb_for(const Item *it) { return it && !strcmp(preview_mode(), "imdb") && !strncmp(it->id, "tt", 2) && (!strcmp(it->type, "movie") || !strcmp(it->type, "series")); }
+static int clip_for(const Item *it) { return it && !strcmp(preview_mode(), "title") && !strncmp(it->id, "tt", 2) && (!strcmp(it->type, "movie") || !strcmp(it->type, "series")); }
 static void try_start(const BgtView *v) {
   if (v->shedding) return;   /* the TV is struggling: no trailer for now */
   if (v->spotlight) return;  /* the spotlight moves on by itself */
   if (st != S_OFF || v->blocked || !v->focused || !v->focused->id[0] || !v->focused->type[0]) return;
   const char *mode = preview_mode(); if (!strcmp(mode, "off") || getenv("SB_NOBTR")) return; /* (SB_NOBTR: development, measuring without it) */
   snprintf(tid, sizeof tid, "%s", v->focused->id); snprintf(ttype, sizeof ttype, "%s", v->focused->type);
+  quick = 0;
   if (clip_for(v->focused)) { clip_search(v->focused, 0); clip = 1; st = S_FIND; gen++; return; } /* (the link may be ready already: the tick plays it) */
   clip = 0;
   st = S_META; sb_meta(ttype, tid, on_meta, (void *)(uintptr_t)++gen);
@@ -172,7 +191,16 @@ static void try_start(const BgtView *v) {
 void bgt_tick(const BgtView *v) {
   double t = now_s();
   if (st == S_GONE && t >= hiddenAt && (v->idle >= 0.42f || t - hiddenAt >= 4)) { /* (0.42: just after a card has finished opening) */ st = S_OFF; if (H.unload) H.unload(H.ud); }
-  int can = v->browsing && v->focused && !v->blocked && !v->spotlight && !v->shedding && !getenv("SB_NOBTR"), isClip = can && clip_for(v->focused);
+  int can = v->browsing && v->focused && !v->blocked && !v->spotlight && !v->shedding && !getenv("SB_NOBTR"), isClip = can && clip_for(v->focused), isQuick = can && imdb_for(v->focused);
+  if (isQuick && v->idle > 0.1f && strcmp(qFocus, v->focused->id)) { /* settled on a new card: its clip and the ones around it, in one request */
+    snprintf(qFocus, sizeof qFocus, "%s", v->focused->id); settleAt = v->idle > 5 ? t : t - v->idle;
+    trailer_clips_want(v->focused->id); if (v->next) trailer_clips_want(v->next->id);
+    for (int i = 0; i < v->nnear; i++) if (v->near[i]) trailer_clips_want(v->near[i]->id); }
+  if (isQuick && !idleOn && st == S_OFF && v->idle > QUICK_IDLE) { char qu[SB_URL_MAX], qn[64]; int qc = 0;
+    if (trailer_clip_ready(v->focused->id, v->hero, qu, sizeof qu, &qc, qn, sizeof qn) > 0) { /* nothing to wait for: it plays now */
+      idleOn = 1; snprintf(tid, sizeof tid, "%s", v->focused->id); snprintf(ttype, sizeof ttype, "%s", v->focused->type); clip = 0; quick = 1; gen++; st = S_LOAD; memAt = t + 10; qLoadAt = t;
+      fprintf(stderr, "[btr] %s %s: %s, %d MB free\n", qc ? "imdb clip" : "imdb trailer", tid, qn, plat_mem_free_mb());
+      if (H.load) H.load(qu, "video/mp4", tid, H.ud); return; } }
   if (!v->browsing) for (int k = 0; k < 2; k++) if (SL[k].tok && !SL[k].done) { sb_streams_cancel(SL[k].tok); SL[k].tok = 0; SL[k].id[0] = 0; } /* a page open: its own requests come first */
   if (idleOn && st == S_OFF && v->focused && tid[0] && strcmp(tid, v->focused->id)) idleOn = 0; /* the billboard turned by itself: a new title with no key pressed */
   if (isClip && v->idle > PREFETCH_IDLE) { if (strcmp(CP.id, v->focused->id)) settleAt = v->idle > 5 ? t : t - v->idle; clip_search(v->focused, 0); } /* the link, looked for while the card opens */
@@ -182,10 +210,11 @@ void bgt_tick(const BgtView *v) {
   if (clip && st == S_FIND && !strcmp(CP.id, tid) && CP.pickAt > 0 && (CP.resolved || (CP.resolving && CP.failed >= CP.resolving) || t - CP.pickAt > RESOLVE_MAX)) clip_go(t);
   else if (clip && st == S_FIND && !strcmp(CP.id, tid) && CP.score[0] <= 0 && (CP.done || t - CP.askedAt > 6 || (CP.firstAt && t - CP.firstAt > 1.5))) clip_go(t); /* nothing suits: the trailer (1.5 s after the first answer: the addons that answer have answered by then, the rest are the ones that never do) */
   if (clip && st == S_SHOW && showAt && t - showAt > CLIP_SECONDS) { fprintf(stderr, "[btr] clip: %d s shown, the card goes back\n", CLIP_SECONDS); stop_soft(); }
+  if (quick && st == S_SHOW && showAt && t - showAt > QUICK_SECONDS) { fprintf(stderr, "[btr] %d s shown, the card goes back\n", QUICK_SECONDS); stop_soft(); }
   if (isClip && !idleOn && st == S_OFF && (v->idle > CLIP_IDLE || (v->idle > CLIP_IDLE_READY && CP.resolved && !strcmp(CP.id, v->focused->id)))) { idleOn = 1; try_start(v); return; } /* a clip: sooner than a trailer, checked every frame (not while the last one's decoder is still going: tried then, it would never be tried again until a key) */
   if (t - lastCheck < 1) return;
   lastCheck = t;
   int idle = v->idle > 3 && v->browsing && v->focused && !v->blocked;
   if (idle && !idleOn && st == S_OFF) { idleOn = 1; try_start(v); }
-  else if (!idle && idleOn && !(isClip && v->idle > CLIP_IDLE_READY)) { if (st == S_LOAD || st == S_SHOW) fprintf(stderr, "[btr] stop: idle %.1f s, board %d, focused %d, blocked %d\n", v->idle, v->browsing, v->focused != NULL, v->blocked); idleOn = 0; stop_soft(); }
+  else if (!idle && idleOn && !(isClip && v->idle > CLIP_IDLE_READY) && !(isQuick && v->idle > QUICK_IDLE)) { if (st == S_LOAD || st == S_SHOW) fprintf(stderr, "[btr] stop: idle %.1f s, board %d, focused %d, blocked %d\n", v->idle, v->browsing, v->focused != NULL, v->blocked); idleOn = 0; stop_soft(); }
 }

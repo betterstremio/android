@@ -56,7 +56,7 @@
 #define RANK_W 130.0f         /* a Top 10 card's numeral, in front of it */
 /* cp: each card's resolved picture and words beside its item (cpSt 0 not yet, 1 final, 2 its translation may still
    come); pf: the ranges last fetched ahead (per call site), fetched again only when they move or a picture changes */
-typedef struct { char title[96]; ItemList items; int col, wide, label, hidden, closing; float hk; double closeAt; Tween off, a; FocusPop pop; int popCol; Nudge nudge; double locAt;
+typedef struct { char title[96]; ItemList items; int col, wide, label, hidden, closing; float hk; double closeAt; Tween off, a; FocusPop pop; int popCol; Nudge nudge; double locAt, wideAt;
   CardPrep *cp; unsigned char *cpSt; int ncp; unsigned cpGen, cpLg; int pf[3][2]; unsigned char pfWait[3]; int pfOpen; /* pfOpen: col + 1 when the open card's wide pictures around it were last asked for */
   /* a catalog that pages: where its next page starts (the items its addon sent so far), one page asked at a time */
   CatalogDef def; int hasDef, skipAt, more, paging; double pageAt;
@@ -76,7 +76,7 @@ typedef struct {
   Tween spotY, rowsA, spotA, dotsA, dotW[NFEAT]; int heroSpot, dotsWant; double dotsGo; char scoped[64];
   Tween hostY; Timer1 fade; Nudge nudge;
   /* the focused card opens after a rest (as Nuvio's): wider, its backdrop over its poster, then the trailer in it */
-  Tween exp; int expRow, expCol;
+  Tween exp; int expRow, expCol; double wideBt, wideSt;
   double heroAt, fadeHold; int heroPending, fastBg; /* fadeHold: the fade-in waits (a moment at most) for the whole description */
   /* the hero, in one path: fade out, gather (details, translation, logo: 0.45 s at most), put in, fade in; anything
      better that arrives later comes in with one more fade */
@@ -105,12 +105,22 @@ static float step_of(const Row *r) { return card_w(r) + RGAP + (r->rank ? RANK_W
 #define SEEALL_AT 60
 #define CARD_OPEN_AFTER 3.0f
 #define CARD_OPEN_W 800.0f /* 16:9 at a poster's height */
+#define WIDE_SM_W 320
+#define WIDE_SM_H 180
 static int see_all(const Row *r) { return r->hasDef && r->def.skip && r->items.n > 0 && !r->more; }
 static int col_last(const Row *r) { return r->ntiles ? r->ntiles - 1 : r->items.n - 1 + see_all(r); }
 static const ColFolder *tile_cur(const Board *b) { if (b->rowIdx < 0 || b->rowIdx >= b->n) return NULL; const Row *r = &b->rows[b->rowIdx]; return r->ntiles && r->col < r->ntiles ? &r->tiles[r->col] : NULL; }
 static void see_all_open(const Row *r) { CatParams p; memset(&p, 0, sizeof p); p.def = r->def; snprintf(p.title, sizeof p.title, "%s", T(r->title)); app_go(SCR_CAT, &p, 0); }
 static const Item *focused_of(Board *b) { if (spotOn(b) && b->nfeat) return &b->feat[b->featIdx % b->nfeat]; if (b->rowIdx < 0 || b->rowIdx >= b->n) return NULL; Row *r = &b->rows[b->rowIdx]; return r->col < r->items.n ? &r->items.items[r->col] : NULL; }
 const Item *board_next_item(void) { Board *b = cur(); if (!b || topNav.active) return NULL; if (spotOn(b)) return b->kind == 0 && b->nfeat > 1 ? &b->feat[(b->featIdx + 1) % b->nfeat] : NULL; /* (the billboard's next title: its link ready before it turns) */ if (b->rowIdx >= b->n) return NULL; Row *r = &b->rows[b->rowIdx]; return r->col + 1 < r->items.n ? &r->items.items[r->col + 1] : NULL; }
+int board_on_billboard(void) { Board *b = cur(); return b && !topNav.active && spotOn(b) && b->kind == 0 && b->cine && b->bill; }
+int board_near_items(const Item **out, int max) { Board *b = cur(); int n = 0; if (!b || topNav.active) return 0;
+#define NEAR_ADD(rw, i) do { if ((i) >= 0 && (i) < (rw)->items.n && n < max) out[n++] = &(rw)->items.items[i]; } while (0)
+  if (spotOn(b)) { for (int k = 1; k <= 2 && b->kind == 0 && k < b->nfeat; k++) if (n < max) out[n++] = &b->feat[(b->featIdx + k) % b->nfeat]; if (b->n) for (int i = 0; i < 4; i++) NEAR_ADD(&b->rows[0], i); return n; }
+  if (b->rowIdx < 0 || b->rowIdx >= b->n) return 0;
+  { const Row *r = &b->rows[b->rowIdx]; for (int d = 1; d <= 5; d++) NEAR_ADD(r, r->col + d); NEAR_ADD(r, r->col - 1); }
+  for (int dr = -1; dr <= 1; dr += 2) { int ri = b->rowIdx + dr; if (ri < 0 || ri >= b->n) continue; const Row *q = &b->rows[ri]; NEAR_ADD(q, q->col); NEAR_ADD(q, q->col + 1); }
+  return n; }
 int board_spot_up(void) { Board *b = cur(); return b && b->featOn && !topNav.active && !(b->kind == 0 && b->cine && b->bill); } /* (a spotlight with no place for a video; the cinematic billboard has one) */
 
 /* ---- rows ---- */
@@ -713,10 +723,12 @@ static void row_draw(Board *b, Row *r, int ri, float y, int near, float rowA) {
   }
   if (ca < 1) gfx_opacity_pop();
   if (near) { row_prefetch(r, 0, i1 + 1, i1 + 6); row_prefetch(r, 1, i0 - 2, i0 - 1); }
-  if (active && r->col < r->items.n && r->pfOpen != r->col + 1) { /* the wide picture is asked for the moment the focus lands, and for the next cards: asked only once the card began to open, it arrived after the card had finished widening */
-    r->pfOpen = r->col + 1; int fw0 = r->wide ? (int)cw : (int)CARD_OPEN_W; char pu0[512];
-    for (int d = 0; d <= 3; d++) { int i = r->col + d; if (i < r->items.n && sb_bg_mid(&r->items.items[i], pu0, sizeof pu0)[0]) img_get_shaped(pu0, fw0, (int)ch, CARD_R, 1); }
-    if (r->col > 0 && sb_bg_mid(&r->items.items[r->col - 1], pu0, sizeof pu0)[0]) img_get_shaped(pu0, fw0, (int)ch, CARD_R, 1); }
+  if (near && !r->ntiles && r->items.n && (r->pfOpen != (active ? r->col + 1 : 0) || app_now() >= r->wideAt)) { /* the wide pictures: asked as the focus lands and again every half second (an ask nobody repeats for 1.5 s is dropped) */
+    int landed = active && r->pfOpen != r->col + 1, fw0 = r->wide ? (int)cw : (int)CARD_OPEN_W; char pu0[512]; r->pfOpen = active ? r->col + 1 : 0; r->wideAt = app_now() + 0.5;
+    if (landed && r->col < r->items.n && sb_bg_card(&r->items.items[r->col], pu0, sizeof pu0)[0]) img_urgent_shaped(pu0, fw0, (int)ch, CARD_R, 1); /* the one the card is about to show: ahead of the queue */
+    for (int d = active ? -1 : 0; d <= (active ? 6 : 2); d++) { int i = r->col + d; if (i < 0 || i >= r->items.n) continue; const Item *wi = &r->items.items[i];
+      if (!r->wide && sb_bg_small(wi, pu0, sizeof pu0)[0]) img_get_shaped(pu0, WIDE_SM_W, WIDE_SM_H, CARD_R * 0.4f, 1); /* (a stand-in of a few KB, for every card it could reach) */
+      if ((d == 0 || (active && d <= 2)) && (d == 0 || img_has_room()) && sb_bg_card(wi, pu0, sizeof pu0)[0]) img_get_shaped(pu0, fw0, (int)ch, CARD_R, 1); } }
   if (active && r->col < r->items.n) { float x = 48 + r->col * step - off + rk0 + (rem && r->col >= b->remIdx ? step * (1 - rk) : 0); if (rtl) x = SB_W - x - cw; float ox = rtl ? x - ex : x, ow = cw + ex; /* (mirrored, it opens to the left) */
     int hold; const CardPrep *cp = row_prep(r, r->col, 1, &hold, NULL);
     if (ra < 1) gfx_opacity_push(ra);
@@ -724,8 +736,16 @@ static void row_draw(Board *b, Row *r, int ri, float y, int near, float rowA) {
     lift_begin_z(lk, 1, hp, ox, cy, ow, ch, CARD_R, 0.06f * (1 - ek)); /* (still when open: the video's rectangle cannot scale with it) */
     if (ex > 0) gfx_rrect(ox, cy, ow, ch, CARD_R, RGB(0x0c, 0x0b, 0x11));
     card_draw_prep(&r->items.items[r->col], cp, x, cy, cw, ch, r->wide, r->label, 1);
-    if (ek > 0.001f) { char bu[512]; int fw = r->wide ? (int)cw : (int)CARD_OPEN_W; if (sb_bg_mid(&r->items.items[r->col], bu, sizeof bu)[0]) { GLuint bt = img_get_shaped(bu, fw, (int)ch, CARD_R, 1); /* a size of its own, loaded once: it is uncovered as the card widens */
-        if (bt) { gfx_clip_push(ox, cy, ow, ch); gfx_opacity_push(ek * ek); ph_picture(bt, rtl ? ox + ow - fw : ox, cy, (float)fw, ch, CARD_R, WHITE_A(255)); gfx_opacity_pop(); gfx_clip_pop(); } } }
+    if (ek > 0.001f) { char bu[512]; int fw = r->wide ? (int)cw : (int)CARD_OPEN_W; if (sb_bg_card(&r->items.items[r->col], bu, sizeof bu)[0]) { GLuint bt = img_get_shaped(bu, fw, (int)ch, CARD_R, 1); /* a size of its own, loaded once: it is uncovered as the card widens */
+        char su[512]; GLuint sm = !r->wide && sb_bg_small(&r->items.items[r->col], su, sizeof su)[0] ? img_get_shaped(su, WIDE_SM_W, WIDE_SM_H, CARD_R * 0.4f, 1) : 0; float wx = rtl ? ox + ow - fw : ox; double wn = app_now();
+        if (sm && !b->wideSt) b->wideSt = app_trailer_idle() + 1e-3; /* (how long after the key each came: the log below) */
+        if (bt && !b->wideBt) { b->wideBt = wn - (ek < 0.3f ? 1 : 0); fprintf(stderr, "[card] wide picture %.2f s after the key (stand-in %.2f s, card %s)\n", app_trailer_idle(), b->wideSt, ek >= 0.999f ? "already open" : "opening"); }
+        float sk = bt ? clampf((float)((wn - b->wideBt) / 0.18), 0, 1) : 0; /* the sharp one: over the stand-in, softly; there before the card opened: nothing to see change */
+        if (sm || bt) { gfx_clip_push(ox, cy, ow, ch);
+          if (sm && sk < 1) { gfx_opacity_push(ek); ph_picture(sm, wx, cy, (float)fw, ch, CARD_R, WHITE_A(255)); gfx_opacity_pop(); }
+          if (bt) { gfx_opacity_push(sm ? ek * sk : ek * ek); ph_picture(bt, wx, cy, (float)fw, ch, CARD_R, WHITE_A(255)); gfx_opacity_pop(); }
+          gfx_clip_pop(); } } }
+    else b->wideBt = b->wideSt = 0;
     if (hp > 0) hold_trace_draw(x, cy, cw, ch, CARD_R, ease_apply(EASE_IN_OUT, hp));
     lift_end(lk, ox, cy, ow, ch, CARD_R);
     if (b->cine && ek > 0.001f) cine_card_art(&r->items.items[r->col], ox, cy, ow, ch, ek, rtl);
