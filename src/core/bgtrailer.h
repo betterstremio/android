@@ -41,4 +41,5 @@ void bgt_ended(void);               /* it ended or failed */
 BgtState bgt_state(void);
 int    bgt_clip(void);              /* what loads is the title itself (not a trailer): silent, started past the credits */
 double bgt_clip_seek(double dur);   /* where a clip starts, once its length is known */
+double bgt_clip_start(void);        /* where a clip is asked to begin before its length is known */
 #endif

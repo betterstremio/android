@@ -63,6 +63,7 @@ void sb_fill_item(Item *it, const cJSON *m, const char *type);
 const char *sb_poster_of(const Item *it, char *buf, size_t cap);
 const char *sb_bg_small(const Item *it, char *buf, size_t cap);
 const char *sb_bg_mid(const Item *it, char *buf, size_t cap);
+const char *sb_bg_large(const Item *it, char *buf, size_t cap); /* the largest there is: for a picture drawn nearly full screen */
 const char *sb_logo_of(const Item *it, char *buf, size_t cap);
 int  sb_is_imdb(const char *id);
 void sb_meta_line(const cJSON *m, char *out, size_t cap);

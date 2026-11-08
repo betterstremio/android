@@ -54,6 +54,9 @@ void video_seek(double sec) {
   if (timedBase[0]) { char u[4200]; snprintf(u, sizeof u, "%s?t=%.0f", timedBase, sec); timedOff = (double)(long)sec; char b[4096]; snprintf(b, sizeof b, "%s", timedBase); double d = timedDur; load_at(u, 0); snprintf(timedBase, sizeof timedBase, "%s", b); timedDur = d; return; }
   fprintf(stderr, "[video] seek to %.1f s\n", sec);
   JNIEnv *e = env(); if (!cls || !e) return; (*e)->CallStaticVoidMethod(e, cls, mSeek, sec); clear_exc(e, "seek"); S.settling = 1; }
+void video_seek_now(double sec) { video_seek(sec); }
+int video_load_at(const char *u, double sec) { (void)sec; video_load(u); return 0; }
+double video_reported_time(void) { return -1; }
 double video_time(void) { return S.t + (timedBase[0] ? timedOff : 0); }
 double video_duration(void) { return timedBase[0] && timedDur > 0 ? timedDur : S.dur; }
 double video_buffered_end(void) { return S.buf + (timedBase[0] ? timedOff : 0); }

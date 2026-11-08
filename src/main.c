@@ -346,10 +346,10 @@ int main(int argc, char **argv) {
     { static int first = 1, ms = 30; if (first) { first = 0; ms = getenv("SB_PROF_MS") ? atoi(getenv("SB_PROF_MS")) : 30; if (profSlow) profMark = 0; } /* start-up is not a frame */
       if (profSlow && (double)(tSwap - tCpu0) + accPreFrame < ms) profN = profMark; }
     { /* SB_SLOWLOG: every frame over the period says where its time went (at most 20 lines a second) */
-      static int slowLog = -1; if (slowLog < 0) slowLog = getenv("SB_SLOWLOG") != NULL;
-      if (slowLog) { double hz = (double)SDL_GetPerformanceFrequency(), gpu = (tG1 - tG0) * 1000.0 / hz; double tot = (double)(tSwap - tCpu0) + accPreFrame;
+      static int slowLog = -1; if (slowLog < 0) slowLog = getenv("SB_SLOWLOG") != NULL; int nerdLog = !slowLog && nerds_on(); /* (Stats for nerds on: only the frames a viewer would see stutter) */
+      if (slowLog || nerdLog) { double hz = (double)SDL_GetPerformanceFrequency(), gpu = (tG1 - tG0) * 1000.0 / hz; double tot = (double)(tSwap - tCpu0) + accPreFrame;
         static Uint32 logT; static int logN; if (SDL_GetTicks() - logT > 1000) { logT = SDL_GetTicks(); logN = 0; }
-        if (tot > 15.0 && logN++ < 20) fprintf(stderr, "[slow] f%d %s %.0f ms: pumps %.0f (events %u net %u pictures %u) tick %u draw %u end %u evict %u gpu %.1f swap %u | %d calls %d quads\n", frame, stress_screen(), tot, accPreFrame, tEv, tNet, tImg, tA - tCpu0, tB - tA, tC - tB, tCpu1 - tC, gpu, tSwap - tCpu1, gfx_draw_calls(), gfx_quads()); } }
+        if (tot > (nerdLog ? 26.0 : 15.0) && logN++ < 20) fprintf(stderr, "[slow] f%d %s %.0f ms: pumps %.0f (events %u net %u pictures %u) tick %u draw %u end %u evict %u gpu %.1f swap %u | %d calls %d quads\n", frame, stress_screen(), tot, accPreFrame, tEv, tNet, tImg, tA - tCpu0, tB - tA, tC - tB, tCpu1 - tC, gpu, tSwap - tCpu1, gfx_draw_calls(), gfx_quads()); } }
     nerds_frame((float)(tCpu1 - tCpu0), gfx_draw_calls(), gfx_quads());
     static double accCpu, accSwap; static int accN; accCpu += tCpu1 - tCpu0; accSwap += tSwap - tCpu1; accN++;
 #ifdef SB_MAC

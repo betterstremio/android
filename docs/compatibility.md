@@ -4,9 +4,9 @@
 |---|---|
 | 3.x (2016 to 2017 TVs) | Should work, not tested yet |
 | 4.x (2018 to 2019 TVs) | Tested on webOS 4.4 |
-| 5.x and 6.x | Should work, not tested yet |
+| 5.x | Should work, not tested yet |
+| 6.x (2021 TVs) | Tested on webOS 6.5 (LG C1) |
 | 22 to 25 | Should work, not tested yet |
 
 ## Install
-- Homebrew Channel: add the repository `https://betterstremio.github.io/webos/apps.json`, then install Stremio Origin.
-- Developer Mode: install the `.ipk` from Releases (not tested yet).
+- Download the `.ipk` from Releases and install it on a TV in Developer Mode.

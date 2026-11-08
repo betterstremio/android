@@ -24,6 +24,8 @@
 #include "core/httpd.h"
 #include "core/recs.h"
 #include "core/pace.h"
+#include "platform/plat.h"
+#include "core/bgtrailer.h"
 
 #define MAXROWS 32
 #define SPOT_ROW 255                 /* (a details answer for a spotlight title, in place of its row) */
@@ -46,8 +48,8 @@
 #define BILL_X 48.0f
 #define BILL_Y 112.0f
 #define BILL_W (SB_W - 96.0f)
-#define BILL_H 720.0f
-#define HOME_SPOT_DY 370.0f   /* the rows under the billboard: the first row's title just below it */
+#define BILL_H 816.0f
+#define HOME_SPOT_DY 466.0f  /* the rows under the billboard: the first row's title just below it */
 #define CINE_TOP 104.0f       /* the focused row's top, docked under the bar */
 #define CINE_DET_H 150.0f     /* the details under the open card */
 #define CINE_DESC_W 1100.0f
@@ -55,7 +57,7 @@
 /* cp: each card's resolved picture and words beside its item (cpSt 0 not yet, 1 final, 2 its translation may still
    come); pf: the ranges last fetched ahead (per call site), fetched again only when they move or a picture changes */
 typedef struct { char title[96]; ItemList items; int col, wide, label, hidden, closing; float hk; double closeAt; Tween off, a; FocusPop pop; int popCol; Nudge nudge; double locAt;
-  CardPrep *cp; unsigned char *cpSt; int ncp; unsigned cpGen, cpLg; int pf[3][2]; unsigned char pfWait[3];
+  CardPrep *cp; unsigned char *cpSt; int ncp; unsigned cpGen, cpLg; int pf[3][2]; unsigned char pfWait[3]; int pfOpen; /* pfOpen: col + 1 when the open card's wide pictures around it were last asked for */
   /* a catalog that pages: where its next page starts (the items its addon sent so far), one page asked at a time */
   CatalogDef def; int hasDef, skipAt, more, paging; double pageAt;
   /* a collection's row: tiles, not titles (no Item, so no details, trailer or hold menu come near them) */
@@ -108,11 +110,11 @@ static int col_last(const Row *r) { return r->ntiles ? r->ntiles - 1 : r->items.
 static const ColFolder *tile_cur(const Board *b) { if (b->rowIdx < 0 || b->rowIdx >= b->n) return NULL; const Row *r = &b->rows[b->rowIdx]; return r->ntiles && r->col < r->ntiles ? &r->tiles[r->col] : NULL; }
 static void see_all_open(const Row *r) { CatParams p; memset(&p, 0, sizeof p); p.def = r->def; snprintf(p.title, sizeof p.title, "%s", T(r->title)); app_go(SCR_CAT, &p, 0); }
 static const Item *focused_of(Board *b) { if (spotOn(b) && b->nfeat) return &b->feat[b->featIdx % b->nfeat]; if (b->rowIdx < 0 || b->rowIdx >= b->n) return NULL; Row *r = &b->rows[b->rowIdx]; return r->col < r->items.n ? &r->items.items[r->col] : NULL; }
-const Item *board_next_item(void) { Board *b = cur(); if (!b || spotOn(b) || topNav.active || b->rowIdx >= b->n) return NULL; Row *r = &b->rows[b->rowIdx]; return r->col + 1 < r->items.n ? &r->items.items[r->col + 1] : NULL; }
-int board_spot_up(void) { Board *b = cur(); return b && b->kind == 1 && b->featOn && !topNav.active; }
+const Item *board_next_item(void) { Board *b = cur(); if (!b || topNav.active) return NULL; if (spotOn(b)) return b->kind == 0 && b->nfeat > 1 ? &b->feat[(b->featIdx + 1) % b->nfeat] : NULL; /* (the billboard's next title: its link ready before it turns) */ if (b->rowIdx >= b->n) return NULL; Row *r = &b->rows[b->rowIdx]; return r->col + 1 < r->items.n ? &r->items.items[r->col + 1] : NULL; }
+int board_spot_up(void) { Board *b = cur(); return b && b->featOn && !topNav.active && !(b->kind == 0 && b->cine && b->bill); } /* (a spotlight with no place for a video; the cinematic billboard has one) */
 
 /* ---- rows ---- */
-static void prep_free(Row *r) { free(r->cp); free(r->cpSt); r->cp = NULL; r->cpSt = NULL; r->ncp = 0; for (int k = 0; k < 3; k++) { r->pf[k][0] = r->pf[k][1] = -1; r->pfWait[k] = 0; } }
+static void prep_free(Row *r) { free(r->cp); free(r->cpSt); r->cp = NULL; r->cpSt = NULL; r->ncp = 0; for (int k = 0; k < 3; k++) { r->pf[k][0] = r->pf[k][1] = -1; r->pfWait[k] = 0; } r->pfOpen = 0; }
 static void row_clear(Row *r) { itemlist_clear(&r->items); prep_free(r); }
 static Row *row_add(Board *b, const char *title, int wide, int label) {
   if (b->n >= MAXROWS) return NULL; Row *r = &b->rows[b->n++]; row_clear(r); memset(r, 0, sizeof *r); prep_free(r);
@@ -422,17 +424,24 @@ static void bill_btn(float x, float y, float w, int play, int on, float a) {
   text_draw(T(play ? "Play" : "More info"), x + 72, y + (h - text_line_height(27)) / 2, 27, 700, ink, 0, 0, ALIGN_LEFT);
 }
 static float bill_btn_w(int play) { return 72 + text_width(T(play ? "Play" : "More info"), 27, 700, 0) + 34; }
+static int bill_hi(void) { static int v = -1; if (v < 0) v = plat_mem_total_mb() >= 1500; return v; }
+static const char *bill_src(const Item *it, char *bu, size_t cap) { return bill_hi() ? sb_bg_large(it, bu, cap) : sb_bg_mid(it, bu, cap); }
 static void bill_draw(Board *b) {
   float a = b->spotA.v; if (a <= 0.002f || !b->nfeat) return;
   float dy = -60 * (1 - a), X = BILL_X, Y = BILL_Y + dy, W = BILL_W, H = BILL_H; int rtl = app_rtl();
-  const Item *it = &b->feat[b->featIdx % b->nfeat]; char bu[512]; sb_bg_mid(it, bu, sizeof bu);
+  const Item *it = &b->feat[b->featIdx % b->nfeat]; char bu[512]; bill_src(it, bu, sizeof bu); int tw = bill_hi() ? (int)W : 1280, th = bill_hi() ? (int)H : 573; float tr = bill_hi() ? 28 : 20;
+  /* (fit 2: a 16:9 picture is wider-cropped from the bottom only: faces are near the top of a backdrop, and the words cover its bottom) */
   if (strcmp(bu, b->billCur)) { snprintf(b->billPrev, sizeof b->billPrev, "%s", b->billCur); snprintf(b->billCur, sizeof b->billCur, "%s", bu); b->billSwitch = app_now(); }
   gfx_opacity_push(a);
-  /* the picture, uploaded at 1280 wide and scaled up (memory: see the plan's low-end table); the last one under it while the new fades in */
-  float k = clampf((float)((app_now() - b->billSwitch) / 0.45), 0, 1); GLuint cur = b->billCur[0] ? img_get_shaped(b->billCur, 1280, 505, 20, 1) : 0;
-  if (!cur) k = 0; else if (k < 1 && b->billPrev[0]) { GLuint pv = img_get_shaped(b->billPrev, 1280, 505, 20, 1); if (pv) ph_picture(pv, X, Y, W, H, 28, WHITE_A(255)); else ph_surface(X, Y, W, H, 28); }
+  /* the picture at the size it is drawn, from the largest there is (a TV short of memory: 1280 wide, scaled up); the last one under it while the new fades in */
+  float k = clampf((float)((app_now() - b->billSwitch) / 0.45), 0, 1); GLuint cur = b->billCur[0] ? img_get_shaped(b->billCur, tw, th, tr, 2) : 0;
+  if (cur && k >= 1 && b->nfeat > 1) { char nu[512]; if (bill_src(&b->feat[(b->featIdx + 1) % b->nfeat], nu, sizeof nu)[0]) img_get_shaped(nu, tw, th, tr, 2); } /* the next title's, decoded before it turns */
+  if (!cur) k = 0; else if (k < 1 && b->billPrev[0]) { GLuint pv = img_get_shaped(b->billPrev, tw, th, tr, 2); if (pv) ph_picture(pv, X, Y, W, H, 28, WHITE_A(255)); else ph_surface(X, Y, W, H, 28); }
   else if (!b->billPrev[0] && !cur) ph_surface(X, Y, W, H, 28);
   if (cur) { if (k < 1) gfx_opacity_push(ease_apply(EASE_CSS_EASE, k)); ph_picture(cur, X, Y, W, H, 28, WHITE_A(255)); if (k < 1) gfx_opacity_pop(); }
+  /* its preview plays inside it, under the words: the plane goes behind this rectangle and the window is see-through there */
+  if (spotOn(b) && !topNav.active && a > 0.99f) { btr_card_rect(X, Y, W, H); float va = btr_card_alpha(); if (va > 0.001f) gfx_hole(X, Y, W, H, 28, va); }
+  gfx_ring(X, Y, W, H, 28, 2, WHITE_A(70));
   if (rtl) gfx_alpha_tex_uv(grad_tex(0), X + W * 0.35f, Y, W * 0.65f, H, RGB(8, 8, 12), 1, 0, 0, 1); else gfx_alpha_tex(grad_tex(0), X, Y, W * 0.65f, H, RGB(8, 8, 12));
   gfx_alpha_tex(grad_tex(1), X, Y, W, H, RGB(8, 8, 12));
   /* the words: logo (or name), facts, Play / More info; they fade between titles with the hero */
@@ -611,7 +620,7 @@ static void board_tick(float dt) {
     if (b->scoped[0] && (!sp || topNav.active)) { b->scoped[0] = 0; accent_scope(NULL, NULL, NULL); }
     else if (sp && b->nfeat && !topNav.active && !b->scoped[0] && b->heroSet && b->heroSpot) { const Item *it = &b->hero; char pu[512], lu[512]; accent_scope(it->id, sb_poster_of(it, pu, sizeof pu), sb_logo_of(it, lu, sizeof lu)); snprintf(b->scoped, sizeof b->scoped, "%s", it->id); }
     if (b->featAt && app_now() >= b->featAt) { b->featAt = 0;
-      if (sp && !topNav.active) { if (app_idle() < 3.5f || (b->kind == 0 && pace_period() > 20)) feat_arm(b); else { if (b->kind == 0) b->billBtn = 0; feat_go(b, 1); } } } } /* (Home's billboard waits while frames run late) */
+      if (sp && !topNav.active) { BgtState bs = bgt_state(); if (app_idle() < 3.5f || (b->kind == 0 && (pace_period() > 20 || bs == BGT_WAIT || bs == BGT_LOAD || bs == BGT_SHOW))) feat_arm(b); /* (its preview plays to the end before the billboard turns) */ else { if (b->kind == 0) b->billBtn = 0; feat_go(b, 1); } } } } /* (Home's billboard waits while frames run late) */
   if (b->heroPending && app_now() >= b->heroAt) { b->heroPending = 0; hero_apply(b); }
   hero_tick(b, dt); logos_ahead(b, 0);
   /* the rows above the focused one scroll out of the way and fade as they go (0.14 s); only the focused row and
@@ -700,6 +709,10 @@ static void row_draw(Board *b, Row *r, int ri, float y, int near, float rowA) {
   }
   if (ca < 1) gfx_opacity_pop();
   if (near) { row_prefetch(r, 0, i1 + 1, i1 + 6); row_prefetch(r, 1, i0 - 2, i0 - 1); }
+  if (active && r->col < r->items.n && r->pfOpen != r->col + 1) { /* the wide picture is asked for the moment the focus lands, and for the next cards: asked only once the card began to open, it arrived after the card had finished widening */
+    r->pfOpen = r->col + 1; int fw0 = r->wide ? (int)cw : (int)CARD_OPEN_W; char pu0[512];
+    for (int d = 0; d <= 3; d++) { int i = r->col + d; if (i < r->items.n && sb_bg_mid(&r->items.items[i], pu0, sizeof pu0)[0]) img_get_shaped(pu0, fw0, (int)ch, CARD_R, 1); }
+    if (r->col > 0 && sb_bg_mid(&r->items.items[r->col - 1], pu0, sizeof pu0)[0]) img_get_shaped(pu0, fw0, (int)ch, CARD_R, 1); }
   if (active && r->col < r->items.n) { float x = 48 + r->col * step - off + rk0 + (rem && r->col >= b->remIdx ? step * (1 - rk) : 0); if (rtl) x = SB_W - x - cw; float ox = rtl ? x - ex : x, ow = cw + ex; /* (mirrored, it opens to the left) */
     int hold; const CardPrep *cp = row_prep(r, r->col, 1, &hold, NULL);
     if (ra < 1) gfx_opacity_push(ra);

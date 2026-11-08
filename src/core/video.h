@@ -7,6 +7,8 @@ typedef enum { VID_IDLE = 0, VID_LOADING, VID_PLAYING, VID_PAUSED, VID_BUFFERING
 typedef struct { char lang[16], name[64], codec[16]; int idx, forced, channels; } VidTrack;   /* codec: as the platform names it ("dts", "ac3", "eac3"...), "" unknown */
 int    video_init(const char *appId);
 void   video_load(const char *url);          /* starts loading and playing */
+int    video_load_at(const char *url, double sec); /* the same, asking to begin at sec; 0: this platform cannot ask (it begins at 0) */
+double video_reported_time(void);            /* the position the player last reported for this load, -1 before its first report */
 /* a stream that can't seek by itself (one continuous local conversion): each seek loads "<base>?t=<seconds>" again,
    times count from that moment, the length is durSec */
 void   video_load_timed(const char *base, double durSec);
@@ -14,6 +16,7 @@ void   video_unload(void);                   /* releases the decoder now */
 void   video_play(void);
 void   video_pause(void);
 void   video_seek(double sec);
+void   video_seek_now(double sec);           /* the same, sent at once: for a seek that is not one of a run of key presses */
 double video_time(void);
 double video_duration(void);                 /* 0 while unknown */
 double video_buffered_end(void);             /* seconds buffered ahead (absolute position) */

@@ -14,7 +14,7 @@
 #include <stdio.h>
 
 /* own = the decoder holds the trailer (the player takes it over the moment it opens) */
-static struct { int own, live, held, resumes, byKey, quiet, endFade, seekWant; double pauseAt, resumeAt, steadyAt; } B;
+static struct { int own, live, held, resumes, byKey, quiet, endFade, seekWant, checkAt; double pauseAt, resumeAt, steadyAt, loadAt, loadT; } B;
 
 /* the trailer in the expanded card (as Nuvio's expanded_card): the plane goes behind the card's rectangle, cover-cropped;
    the board makes the window see-through there. The page itself never gives way */
@@ -30,7 +30,8 @@ static int card_place(void) {
 static void h_load(const char *url, const char *mime, const char *titleId, void *ud) {
   (void)mime; (void)titleId; (void)ud; if (player_open()) return;
   fprintf(stderr, "[trailer] background %s\n", url);
-  video_load(url); B.own = 1; B.live = 0; B.held = 0; B.resumes = 0; B.steadyAt = 0; B.seekWant = bgt_clip();
+  B.loadAt = 0; B.checkAt = 0; B.loadT = app_now(); if (bgt_clip()) { double at = bgt_clip_start(); if (video_load_at(url, at)) B.loadAt = at; } else video_load(url);
+  B.own = 1; B.live = 0; B.held = 0; B.resumes = 0; B.steadyAt = 0; B.seekWant = bgt_clip();
   B.quiet = 1; /* silent until it shows (set once the media is loaded) */
 }
 /* a key: the card shuts at once and the video plays on silent, until the decoder is let go in a pause of the remote.
@@ -59,9 +60,14 @@ void btr_tick(float dt) {
     if (B.quiet && video_has_media()) { B.quiet = 0; video_set_volume(0, 0); } /* (as soon as the media exists: silent until it shows) */
     /* the card opens onto it only once it has been playing steadily for a moment (the plane placed early): the TV says
        "playing" a few frames before the picture is there, which showed as black */
-    if (B.seekWant && video_duration() > 0) { B.seekWant = 0; double to = bgt_clip_seek(video_duration()); fprintf(stderr, "[btr] clip: from %.0f s\n", to); video_seek(to); B.steadyAt = 0; }
+    /* a clip was asked to begin past the credits: the TV's first position report says if it did; if not (or the film is too short for that place), the jump as before */
+    if (B.seekWant && video_duration() > 0) { double d = video_duration(), rep = video_reported_time();
+      if (B.loadAt > 0 && rep > B.loadAt - 30 && B.loadAt <= d * 0.5) { B.seekWant = 0; B.steadyAt = 0; fprintf(stderr, "[btr] clip: the TV began it at %.0f s (%.2f s after the load)\n", rep, now - B.loadT); }
+      else if (B.loadAt <= 0 || B.loadAt > d * 0.5 || rep >= 0) { B.seekWant = 0; double to = bgt_clip_seek(d); fprintf(stderr, "[btr] clip: from %.0f s%s\n", to, B.loadAt > 0 ? " (the TV did not begin there)" : ""); video_seek_now(to); B.steadyAt = 0; }
+      else if (vs == VID_PLAYING) { B.seekWant = 0; B.checkAt = 1; B.steadyAt = 0; fprintf(stderr, "[btr] clip: playing %.2f s after the load, no position yet\n", now - B.loadT); } } /* (some sets report the position only every few seconds: not waited for) */
+    if (B.checkAt && video_reported_time() >= 0) { double rep = video_reported_time(); B.checkAt = 0; fprintf(stderr, "[btr] clip: first position %.0f s\n", rep); if (rep < B.loadAt - 30) video_seek_now(bgt_clip_seek(video_duration())); } /* it did begin at the start after all: the jump, late */
     if (!B.live && !B.seekWant && !video_settling() && video_live() && vs == VID_PLAYING) { if (!B.steadyAt) { B.steadyAt = now; card_place(); } } else if (!B.live) B.steadyAt = 0;
-    if (!B.live && B.steadyAt && now - B.steadyAt > 0.5) { B.steadyAt = 0;
+    if (!B.live && B.steadyAt && now - B.steadyAt > (bgt_clip() ? 0.25 : 0.5)) { B.steadyAt = 0; /* (a clip fades in over its first 0.35 s, which covers the frames the TV is late with) */
       if (!video_partial_plane()) { fprintf(stderr, "[btr] this TV places the plane full-screen only: no trailer in a card\n"); B.live = 1; bgt_ended(); }
       else if (card_place()) { B.live = 1; /* (the card not open yet: asked again next frame, the video runs on behind the page) */
         if (bgt_state() == BGT_LOAD) { bgt_playing(); CD.on = 1; fprintf(stderr, "[btr] showing %dx%d\n", video_width(), video_height());

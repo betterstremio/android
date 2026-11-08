@@ -55,14 +55,14 @@ typedef struct Req {
 } Req;
 static pthread_mutex_t mu = PTHREAD_MUTEX_INITIALIZER;
 static pthread_cond_t cv = PTHREAD_COND_INITIALIZER;
-static Req *queue, *queueTail, *slowQ, *slowTail, *bgQ, *bgTail, *finished, *inflight[10], *fqueue, *fqueueTail;
+static Req *queue, *queueTail, *slowQ, *slowTail, *bgQ, *bgTail, *finished, *inflight[16], *fqueue, *fqueueTail;
 static pthread_cond_t slowCv = PTHREAD_COND_INITIALIZER, bgCv = PTHREAD_COND_INITIALIZER;
 static pthread_cond_t fcv = PTHREAD_COND_INITIALIZER;
 static unsigned nextId = 1; static int npending;
-#define WORKERS 10   /* 0-4 take the quick requests (catalogs, details, the account); 5-7 the slow ones (stream addons, up to
+#define WORKERS 16   /* 0-4 take the quick requests (catalogs, details, the account); 5-7 the slow ones (stream addons, up to
                        45 s each): details never wait behind a debrid addon thinking */
 #define SLOW0 5
-#define BG0 8   /* 8-9: the previews' lane (stream lookups and link resolving for a card at rest): never the slots a title page waits on */
+#define BG0 8   /* 8-15: the previews' lane (stream lookups and link resolving for a card at rest): never the slots a title page waits on. Eight, because every addon is asked at once: with two, an addon that never answers held a slot for its whole timeout and the fast ones waited behind it */
 
 static size_t on_data(char *p, size_t s, size_t n, void *ud) {
   Req *r = ud; size_t add = s * n;

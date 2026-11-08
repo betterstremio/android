@@ -29,12 +29,12 @@ static double lastCheck, hiddenAt, memAt; static char tid[64], ttype[16];
 static int clip; static double clipFrac, clipAbs, showAt, settleAt;
 #define CLIP_SECONDS 30
 #define CLIP_IDLE 1.0f      /* a clip starts this long after the remote rests (a trailer: 3 s) */
-#define CLIP_IDLE_READY 0.6f /* ... or this long, when its link is resolved already (made ready ahead, or kept) */
+#define CLIP_IDLE_READY 0.45f /* ... or this long, when its link is resolved already (made ready ahead, or kept) */
 #define PREFETCH_IDLE 0.35f /* its link is looked for this long after */
 #define CLIP_GRACE 0.7      /* after the first addon's answer, the others this long to bring a better one */
 #define RESOLVE_MAX 5.0     /* no resolved address by then: the TV is given the link itself */
 typedef struct {
-  char id[64], url[2][SB_URL_MAX], addon[96], label[160], final[SB_URL_MAX]; int score[2], done, resolving, resolved, failed; unsigned tok;
+  char id[64], url[2][SB_URL_MAX], addon[96], label[160], final[SB_URL_MAX]; int score[2], done, resolving, resolved, failed, seen; unsigned tok;
   double firstAt, askedAt, pickAt, resolvedAt, frac, abs; unsigned g;
 } ClipPick;
 static ClipPick SL[2]; /* 0: the card in focus; 1: the one to its right, made ready ahead */
@@ -44,6 +44,7 @@ static struct { char id[64], url[SB_URL_MAX], addon[96], label[160]; int score; 
 static const char *preview_mode(void) { const char *m = store_get("bgPreview", ""); if (m[0]) return m; return strcmp(store_get("bgTrailer", "true"), "false") ? "clip" : "off"; }
 int bgt_clip(void) { return clip; }
 double bgt_clip_seek(double dur) { if (dur <= 0) return 0; double t = clipAbs > 0 ? clipAbs : dur * clipFrac; if (t > dur * 0.5) t = dur * 0.3; return t; }
+double bgt_clip_start(void) { return clipAbs > 0 ? clipAbs : 1080; } /* (a series: its fixed place; a film: 18 minutes, 15% of a two-hour one) */
 static double now_s(void) { struct timespec t; clock_gettime(CLOCK_MONOTONIC, &t); return t.tv_sec + t.tv_nsec / 1e9; }
 
 void bgt_init(const BgtHooks *h) { if (h) H = *h; }
@@ -123,6 +124,7 @@ static int pick_ready(const ClipPick *P, double t) { return P->done || P->score[
 static void on_clip_part(StreamGroup *g, int gi, void *ud) {
   (void)gi; ClipPick *P = slot_of(ud); if (!P || P->done || !g) return;
   if (!P->firstAt) P->firstAt = now_s();
+  P->seen += g->n;
   for (int i = 0; i < g->n; i++) { const Stream *s = &g->items[i]; int sc = clip_score(s); if (sc <= 0) continue;
     if (sc > P->score[0]) { P->score[1] = P->score[0]; memcpy(P->url[1], P->url[0], sizeof P->url[0]); P->score[0] = sc;
       snprintf(P->url[0], sizeof P->url[0], "%s", s->url); snprintf(P->addon, sizeof P->addon, "%s", s->addon); snprintf(P->label, sizeof P->label, "%.150s", s->name); }
@@ -151,7 +153,7 @@ static void clip_go(double t) {
   if (!idleOn) { st = S_OFF; return; }
   clipAbs = CP.abs; clipFrac = CP.frac;
   int resolveDead = CP.resolving && !CP.resolved && CP.failed >= CP.resolving;
-  if (CP.score[0] <= 0 || (resolveDead && !CP.url[0][0])) { fprintf(stderr, "[btr] clip: no small SDR link for %s (%.1f s), the trailer instead\n", tid, t - CP.askedAt); clip = 0; st = S_META; sb_meta(ttype, tid, on_meta, (void *)(uintptr_t)gen); return; }
+  if (CP.score[0] <= 0 || (resolveDead && !CP.url[0][0])) { fprintf(stderr, "[btr] clip: no small SDR link for %s (%.1f s, %d links seen), the trailer instead\n", tid, t - CP.askedAt, CP.seen); clip = 0; st = S_META; sb_meta(ttype, tid, on_meta, (void *)(uintptr_t)gen); return; }
   const char *u = CP.resolved ? CP.final : CP.url[0];
   st = S_LOAD; memAt = t + 10; fprintf(stderr, "[btr] clip %s, %s link from %s: %s, %d MB free\n", tid, CP.resolved ? "resolved" : "unresolved", CP.addon, CP.label, plat_mem_free_mb());
   if (H.load) H.load(u, "", tid, H.ud);
@@ -169,20 +171,21 @@ static void try_start(const BgtView *v) {
 }
 void bgt_tick(const BgtView *v) {
   double t = now_s();
-  if (st == S_GONE && t >= hiddenAt && (v->idle >= 0.7f || t - hiddenAt >= 4)) { st = S_OFF; if (H.unload) H.unload(H.ud); }
+  if (st == S_GONE && t >= hiddenAt && (v->idle >= 0.42f || t - hiddenAt >= 4)) { /* (0.42: just after a card has finished opening) */ st = S_OFF; if (H.unload) H.unload(H.ud); }
   int can = v->browsing && v->focused && !v->blocked && !v->spotlight && !v->shedding && !getenv("SB_NOBTR"), isClip = can && clip_for(v->focused);
   if (!v->browsing) for (int k = 0; k < 2; k++) if (SL[k].tok && !SL[k].done) { sb_streams_cancel(SL[k].tok); SL[k].tok = 0; SL[k].id[0] = 0; } /* a page open: its own requests come first */
-  if (isClip && v->idle > PREFETCH_IDLE) { if (strcmp(CP.id, v->focused->id)) settleAt = t - v->idle; clip_search(v->focused, 0); } /* the link, looked for while the card opens */
+  if (idleOn && st == S_OFF && v->focused && tid[0] && strcmp(tid, v->focused->id)) idleOn = 0; /* the billboard turned by itself: a new title with no key pressed */
+  if (isClip && v->idle > PREFETCH_IDLE) { if (strcmp(CP.id, v->focused->id)) settleAt = v->idle > 5 ? t : t - v->idle; clip_search(v->focused, 0); } /* the link, looked for while the card opens */
   for (int k = 0; k < 2; k++) if (SL[k].id[0] && !SL[k].resolving && pick_ready(&SL[k], t)) pick_resolve(&SL[k], k);    /* picked: resolved now */
   if (isClip && CP.resolved && v->next && clip_for(v->next) && v->idle > PREFETCH_IDLE + 0.3f) clip_search(v->next, 1);  /* then the card to its right */
   /* the clip goes once its link is resolved (or resolving gave up, or took too long) */
   if (clip && st == S_FIND && !strcmp(CP.id, tid) && CP.pickAt > 0 && (CP.resolved || (CP.resolving && CP.failed >= CP.resolving) || t - CP.pickAt > RESOLVE_MAX)) clip_go(t);
-  else if (clip && st == S_FIND && !strcmp(CP.id, tid) && CP.score[0] <= 0 && (CP.done || t - CP.askedAt > 6)) clip_go(t); /* nothing suits: the trailer */
+  else if (clip && st == S_FIND && !strcmp(CP.id, tid) && CP.score[0] <= 0 && (CP.done || t - CP.askedAt > 6 || (CP.firstAt && t - CP.firstAt > 1.5))) clip_go(t); /* nothing suits: the trailer (1.5 s after the first answer: the addons that answer have answered by then, the rest are the ones that never do) */
   if (clip && st == S_SHOW && showAt && t - showAt > CLIP_SECONDS) { fprintf(stderr, "[btr] clip: %d s shown, the card goes back\n", CLIP_SECONDS); stop_soft(); }
-  if (isClip && !idleOn && (v->idle > CLIP_IDLE || (v->idle > CLIP_IDLE_READY && CP.resolved && !strcmp(CP.id, v->focused->id)))) { idleOn = 1; try_start(v); return; } /* a clip: sooner than a trailer, checked every frame */
+  if (isClip && !idleOn && st == S_OFF && (v->idle > CLIP_IDLE || (v->idle > CLIP_IDLE_READY && CP.resolved && !strcmp(CP.id, v->focused->id)))) { idleOn = 1; try_start(v); return; } /* a clip: sooner than a trailer, checked every frame (not while the last one's decoder is still going: tried then, it would never be tried again until a key) */
   if (t - lastCheck < 1) return;
   lastCheck = t;
   int idle = v->idle > 3 && v->browsing && v->focused && !v->blocked;
-  if (idle && !idleOn) { idleOn = 1; try_start(v); }
+  if (idle && !idleOn && st == S_OFF) { idleOn = 1; try_start(v); }
   else if (!idle && idleOn && !(isClip && v->idle > CLIP_IDLE_READY)) { if (st == S_LOAD || st == S_SHOW) fprintf(stderr, "[btr] stop: idle %.1f s, board %d, focused %d, blocked %d\n", v->idle, v->browsing, v->focused != NULL, v->blocked); idleOn = 0; stop_soft(); }
 }

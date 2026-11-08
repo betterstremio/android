@@ -17,6 +17,9 @@ int video_has_media(void) { return live; }
 void video_set_volume(int pct, int easeMs) { (void)pct; (void)easeMs; }
 void video_pause(void) { if (st == VID_PLAYING) { st = VID_PAUSED; pausedAt = pos; } }
 void video_seek(double s) { pos = s < 0 ? 0 : s > dur ? dur : s; t0 = SDL_GetTicks() / 1000.0 - pos; }
+void video_seek_now(double s) { video_seek(s); }
+int video_load_at(const char *u, double s) { (void)s; video_load(u); return 0; }
+double video_reported_time(void) { return -1; }
 double video_time(void) { return pos; }
 double video_duration(void) { return st == VID_IDLE || st == VID_LOADING ? 0 : dur; }
 double video_buffered_end(void) { return pos + 90 > dur ? dur : pos + 90; }

@@ -294,6 +294,10 @@ const char *sb_bg_mid(const Item *it, char *buf, size_t cap) { bg_of(it, buf, ca
   if (find_in(buf, "images.metahub.space/background/")) { const char *k[] = { "/background/small/", "/background/large/" }; for (int i = 0; i < 2; i++) replace_in(buf, cap, k[i], "/background/medium/"); }
   else if (find_in(buf, "image.tmdb.org/t/p/")) replace_in(buf, cap, "/t/p/original/", "/t/p/w1280/");
   return buf; }
+const char *sb_bg_large(const Item *it, char *buf, size_t cap) { bg_of(it, buf, cap);
+  if (find_in(buf, "images.metahub.space/background/")) { const char *k[] = { "/background/small/", "/background/medium/" }; for (int i = 0; i < 2; i++) replace_in(buf, cap, k[i], "/background/large/"); }
+  else if (find_in(buf, "image.tmdb.org/t/p/")) { const char *k[] = { "/t/p/w300/", "/t/p/w500/", "/t/p/w780/", "/t/p/w1280/" }; for (int i = 0; i < 4; i++) replace_in(buf, cap, k[i], "/t/p/original/"); }
+  return buf; }
 const char *sb_logo_of(const Item *it, char *buf, size_t cap) { if (it->logo[0]) copy_str(buf, cap, it->logo); else if (sb_is_imdb(it->id)) snprintf(buf, cap, "https://images.metahub.space/logo/medium/%s/img", it->id); else buf[0] = 0; return buf; }
 /* "2h 10min", "130 min", "1 h 5 m" (a year or a year span is not a count of minutes) */
 static int unit_at(const char *q, char u, const char *longs[]) {
