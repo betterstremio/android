@@ -148,7 +148,7 @@ static int keys_opts(void) {
 }
 static void relang(void) { cats[4].n = lang_opts(); if (S.cat == 4 && S.idx >= cats[4].n) S.idx = cats[4].n - 1; for (int i = 0; i < ncat; i++) if (cats[i].opts == keyS) { cats[i].n = keys_opts(); if (S.cat == i && S.idx >= cats[i].n) S.idx = cats[i].n - 1; } S.dirty = 1; }
 static unsigned collGen0; static int coll_done(void *ud) { (void)ud; return board_col_gen() != collGen0; }
-static void coll_card(void) { char url[600]; httpd_url("/collections", url, sizeof url); collGen0 = board_col_gen(); QrCardOpts o; memset(&o, 0, sizeof o); o.title = T("Collections"); o.sub = T("Scan with your phone, then pick or paste your export"); o.url = url; o.check = coll_done; o.doneTitle = T("Collections updated"); o.doneSub = T("They are on Home now"); o.doneHold = 1.6f; qrcard_show(&o); }
+static void coll_card(void) { char url[600]; httpd_url("/collections", url, sizeof url); collGen0 = board_col_gen(); QrCardOpts o; memset(&o, 0, sizeof o); o.title = T("Collections"); o.sub = T("Scan with your phone, then pick or paste your export"); o.url = url; o.check = coll_done; o.doneTitle = T("Collections updated"); o.doneSub = T("They are on Discover now"); o.doneHold = 1.6f; qrcard_show(&o); }
 static void on_tmdb_card(int on, void *ud) { (void)ud; if (on == tmdbOn) return; relang(); if (on) toast(T("Titles and descriptions in your language"), 2000, NULL); }
 static void on_trakt_card(int on, void *ud) { (void)ud; if (on == traktOn) return; relang(); if (on) toast(T("Ratings and comments now come from Trakt too"), 2000, NULL); }
 /* About: the update rows (as the update stands now) and Share logs */

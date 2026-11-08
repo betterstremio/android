@@ -162,11 +162,14 @@ static void col_rows(Board *b, const ColFolder *f) {
   colPend = nx; for (int i = 0; i < nx; i++) { Row *r = row_add(b, x[i].title, 0, 0); if (!r) break; r->def = x[i]; r->hasDef = 1; sb_catalog_url(x[i].url, x[i].type, 60, on_catalog, tok(b, (int)(r - b->rows))); }
   if (!nx) col_search(b);
 }
-/* Home's head: What to watch next (its whole first page kept, so its paging leaves no gap), then the collections, the pinned first */
-static void col_home_rows(Board *b) {
+/* Home's head: What to watch next (its whole first page kept, so its paging leaves no gap) */
+static void pinned_rows(Board *b) {
   { CatalogDef x[4]; int n = sb_pinned_defs(x, 4); for (int i = 0; i < n; i++) { Row *r = row_add(b, x[i].title, 0, 0); if (!r) return; r->def = x[i]; r->hasDef = 1; sb_catalog_url(x[i].url, x[i].type, 60, on_catalog, tok(b, (int)(r - b->rows))); } }
+}
+/* Discover's head, under its spotlight: the collections, the pinned first */
+static void col_disc_rows(Board *b, int keep, const int *oldCols) {
   const ColSet *s = colstore();
-  for (int pass = 1; pass >= 0; pass--) for (int i = 0; i < s->n; i++) { const Collection *c = &s->c[i]; if (!c->pinTop != !pass || !c->nfolders) continue; Row *r = row_add(b, c->title, c->folders[0].shape == COL_LANDSCAPE, 0); if (!r) return; r->tiles = c->folders; r->ntiles = c->nfolders; r->hidden = 0; }
+  for (int pass = 1; pass >= 0; pass--) for (int i = 0; i < s->n; i++) { const Collection *c = &s->c[i]; if (!c->pinTop != !pass || !c->nfolders) continue; Row *r = row_add(b, c->title, c->folders[0].shape == COL_LANDSCAPE, 0); if (!r) return; r->tiles = c->folders; r->ntiles = c->nfolders; r->hidden = 0; if (keep && oldCols[r - b->rows] < r->ntiles) r->col = oldCols[r - b->rows]; }
 }
 /* Home's For You rows (recs.c): because-you-watched, then the region's Top 10 movies and series */
 static void recs_rows(Board *b) {
@@ -192,13 +195,14 @@ static void load_catalog_rows(Board *b, int disc, int keep) {
   if (keep && !disc && b->n && !strcmp(b->rows[0].title, "Continue Watching") && b->rows[0].items.n) { nwas = b->rows[0].items.n; was = malloc(sizeof(Item) * (size_t)nwas); if (was) memcpy(was, b->rows[0].items.items, sizeof(Item) * (size_t)nwas); else nwas = 0; }
   for (int i = 0; i < b->n; i++) row_clear(&b->rows[i]); b->n = 0; b->gen++;
   if (!disc) { b->cine = b->kind == 0 && strcmp(store_get("homeLayout", "cinematic"), "classic"); bill_fill(b, !keep); board_cw_row(b); recs_rows(b); }
-  if (!disc && !was) col_home_rows(b);
+  if (!disc && !was) pinned_rows(b);
   if (was) { Row *r = b->n && !strcmp(b->rows[0].title, "Continue Watching") ? &b->rows[0] : NULL;
     if (r && r->items.n == nwas - 1) for (int i = 0; i < nwas; i++) { int in = 0; for (int j = 0; j < r->items.n && !in; j++) in = !strcmp(r->items.items[j].id, was[i].id);
       if (!in) { b->remIt = was[i]; b->remRow = 0; b->remIdx = i; b->remAt = app_now(); break; } }
     if (!r && nwas == 1) { Row *z = row_add(b, "Continue Watching", 1, 0); /* its last title taken out: the row stays a moment, the title fading and shrinking in it, then closes as the rows under it move up */
       if (z) { z->hidden = 0; z->closing = 1; z->closeAt = app_now(); z->hk = 1; b->remIt = was[0]; b->remRow = (int)(z - b->rows); b->remIdx = 0; b->remAt = app_now(); } }
-    free(was); col_home_rows(b); }
+    free(was); pinned_rows(b); }
+  if (disc) col_disc_rows(b, keep, oldCols);
   CatalogDef defs[12]; int nd = disc ? sb_disc_defs(defs, 12) : sb_home_defs(defs, 12);
   for (int d = 0; d < nd; d++) { Row *r = row_add(b, defs[d].title, 0, 0); if (!r) break; int ri = (int)(r - b->rows); if (keep && ri < MAXROWS) r->col = oldCols[ri]; r->def = defs[d]; r->hasDef = 1; sb_catalog(&defs[d], on_catalog, tok(b, ri)); }
   if (keep) { b->rowIdx = oldRow < b->n ? oldRow : (b->n ? b->n - 1 : 0); if (b->rowIdx < b->n && b->rows[b->rowIdx].closing) { int nx = first_visible_row(b, b->rowIdx + 1, 1); if (nx >= 0) b->rowIdx = nx; } /* (never on the row closing) */ for (int j = 0; j < b->n; j++) { Row *r = &b->rows[j]; if (r->items.n && r->col >= r->items.n) r->col = r->items.n - 1; } }
@@ -531,7 +535,7 @@ void board_col_tick(void) {
   static int once; if (!once) { once = 1; if (getenv("SB_HTTPDLOG")) { char u[600]; httpd_url("/collections", u, sizeof u); fprintf(stderr, "[httpd] %s\n", u); } }
   char *t = httpd_take_collections(); if (!t) return;
   if (*t) colstore_import(t); else colstore_clear(); free(t);
-  colGen++; boards[0].built = 0; if (SCR == SCR_HOME) board_rebuild();
+  colGen++; boards[1].built = 0; if (SCR == SCR_DISC) board_rebuild();
 }
 static int board_key(Board *b, int k);
 static int key_col(int k) { return board_key(&boards[2], k); }
@@ -777,7 +781,7 @@ static int first_cards(Board *b, int nrows) {
   return seen && got >= want;
 }
 int board_home_ready(void) {
-  Board *b = &boards[0]; if (b->rowIdx < b->n && tile_cur(b)) return 1; /* a tile first: no title to wait for */
+  Board *b = &boards[0];
   if (!first_cards(b, 2)) return 0;
   if (!b->heroSet || !b->heroShown) return 0;
   if (b->cine) return 1; /* (no full-screen backdrop to wait for) */
@@ -823,7 +827,7 @@ int board_saver_items(Item *out, int max) {
   int n = 0; Board *d = &boards[1];
   #define TAKE(it) do { const Item *x_ = (it); char bu_[512]; int dup_ = 0; if (!x_->id[0] || n >= max) break; for (int q_ = 0; q_ < n; q_++) if (!strcmp(out[q_].id, x_->id)) dup_ = 1; if (!dup_ && sb_bg_mid(x_, bu_, sizeof bu_)[0]) out[n++] = *x_; } while (0)
   for (int j = 0; j < d->nfeat && j < 6; j++) TAKE(&d->feat[j]);
-  for (int bi = 0; bi < 2; bi++) { Board *b = &boards[bi]; for (int r = 0; r < b->n && r < 4; r++) for (int j = 0; j < b->rows[r].items.n && j < 6; j++) TAKE(&b->rows[r].items.items[j]); }
+  for (int bi = 0; bi < 2; bi++) { Board *b = &boards[bi]; for (int r = 0, took = 0; r < b->n && took < 4; r++) { if (!b->rows[r].items.n) continue; /* (Discover's collections: tiles, no titles) */ took++; for (int j = 0; j < b->rows[r].items.n && j < 6; j++) TAKE(&b->rows[r].items.items[j]); } }
   #undef TAKE
   return n;
 }
@@ -845,7 +849,7 @@ void board_rebuild(void) {
   load_catalog_rows(b, b->kind == 1, 0);
   b->rowIdx = 0;
   for (int j = 0; j < b->n; j++) { Row *r = &b->rows[j];
-    for (int i = 0; i < n; i++) if (!strcmp(titles[i], r->title)) { r->col = cols[i]; if (r->items.n && r->col >= r->items.n) r->col = r->items.n - 1; if (i == ri) b->rowIdx = j; break; } }
+    for (int i = 0; i < n; i++) if (!strcmp(titles[i], r->title)) { r->col = cols[i]; if (r->items.n && r->col >= r->items.n) r->col = r->items.n - 1; if (r->ntiles && r->col >= r->ntiles) r->col = r->ntiles - 1; if (i == ri) b->rowIdx = j; break; } }
   for (int i = 0; i < b->n; i++) { slide_row(&b->rows[i]); tween_set(&b->rows[i].off, b->rows[i].off.to); }
   hero_soon(b, 70);
 }
