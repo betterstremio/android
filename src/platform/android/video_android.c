@@ -68,6 +68,7 @@ void video_set_volume(int pct, int easeMs) { JNIEnv *e = env(); if (!cls || !e) 
 int video_settling(void) { return S.settling != 0; }
 int video_width(void) { return (int)S.w; }
 int video_height(void) { return (int)S.h; }
+float video_frame_rate(void) { return 0; }   /* (the screen is not followed on Android yet) */
 double video_fps(void) { return S.fps; }
 int video_hdr(char *out, int cap) { if (cap > 0) snprintf(out, (size_t)cap, "%s", hdr); return hdr[0] != 0; }
 

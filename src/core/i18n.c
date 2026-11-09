@@ -1,3 +1,4 @@
+#include <pthread.h>
 #include "core/i18n.h"
 #include "core/store.h"
 #include "platform/plat.h"
@@ -48,7 +49,7 @@ static void first_run_defaults(void) {
 }
 static unsigned langGen = 1;
 unsigned i18n_gen(void) { return langGen; }
-int i18n_init(const char *assetDir, const char *want) {
+static int init_(const char *assetDir, const char *want) {
   langGen++;
   /* "auto" (or a language this build lacks): the TV's language when the app has it, else English */
   if (want && (!strcmp(want, "en") || known(want))) snprintf(lang, sizeof lang, "%s", want);
@@ -75,6 +76,11 @@ int i18n_init(const char *assetDir, const char *want) {
   rtl = !strcmp(lang, "ar");
   return 1;
 }
+/* the recommendations worker translates row titles off the main thread: it holds this while it does, and a language change waits the few ms */
+static pthread_mutex_t swapMu = PTHREAD_MUTEX_INITIALIZER;
+void i18n_lock(void) { pthread_mutex_lock(&swapMu); }
+void i18n_unlock(void) { pthread_mutex_unlock(&swapMu); }
+int i18n_init(const char *assetDir, const char *want) { i18n_lock(); int r = init_(assetDir, want); i18n_unlock(); return r; }
 const char *i18n_lang(void) { return lang; }
 int i18n_rtl(void) { return rtl; }
 const char *T(const char *en) {

@@ -2,6 +2,7 @@
    placeholders are filled by T1/T2. Arabic turns the layout right-to-left. */
 #ifndef SB_I18N_H
 #define SB_I18N_H
+void i18n_lock(void); void i18n_unlock(void); /* around T() calls made off the main thread */
 int  i18n_init(const char *assetDir, const char *lang);  /* lang: "auto", "en", "ar", "fr"... */
 const char *i18n_lang(void);
 const char *i18n_tv_lang(void);  /* the TV's own UI language, two letters ("fr") */

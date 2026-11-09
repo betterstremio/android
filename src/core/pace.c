@@ -43,7 +43,7 @@ void pace_init(void) {
   else { nsteps = 1; fixed = 1; }
 }
 double pace_period(void) { return steps[step]; }
-void pace_set_hz(int hz) { if (hz < 24 || hz > 240 || getenv("SB_HZ") || getenv("SB_PACE")) return; steps[0] = 1000.0 / hz; steps[1] = 2000.0 / hz; steps[2] = 3000.0 / hz; fprintf(stderr, "[pace] the screen takes %d frames a second: the app at %d\n", hz, hz); }
+void pace_set_hz(int hz) { if (hz < 24 || hz > 240 || getenv("SB_HZ") || getenv("SB_PACE")) return; steps[0] = 1000.0 / hz; steps[1] = 2000.0 / hz; steps[2] = 3000.0 / hz; step = 0; nwork = 0; calm = 0; lateRun = 0; lastStart = 0; /* (no step down for the change, and the interval across it is not a frame) */ fprintf(stderr, "[pace] the screen takes %d frames a second: the app at %d\n", hz, hz); }
 static void sleep_until(double t) {
   double d = t - now_ms();
   if (d > 2.0) SDL_Delay((Uint32)(d - 1.5));          /* the scheduler wakes late: sleep short of it, then wait the rest out */

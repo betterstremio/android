@@ -13,6 +13,9 @@ int  httpd_start(void);
 /* the address to put in a QR: "http://<LAN IP>:8099/t/<token><suffix>" (suffix "", "/tmdb", "/trakt");
    0 (and "") when the TV has no network address. Starts the server. */
 int  httpd_url(const char *suffix, char *out, size_t cap);
+/* "Logs over the network" on / off (main thread, at launch and when the setting changes): on, the server stays up with no
+   idle end and GET /t/<token>/logs answers with the scrubbed log; off, that path is a 404 and the usual idle end applies */
+void httpd_net_logs(int on);
 /* the address as shown under a code, the token hidden ("/t/••••") */
 void httpd_url_shown(const char *url, char *out, size_t cap);
 /* text typed on the phone: the latest sequence number; when it is past `since`, the text (at most 80

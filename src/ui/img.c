@@ -156,7 +156,7 @@ static void decode_part(Img *im, unsigned char *data, size_t len, int fromNet, c
   small_save(im, px, w, h);
   im->px = px; im->pw = w; im->ph = h; im->pch = 4; im->aspect = (float)w / h;
 }
-static void *worker(void *a) { plat_thread_background(10); (void)a;
+static void *worker(void *a) { plat_thread_background(10); (void)a; net_keep_this_thread();
   for (;;) {
     pthread_mutex_lock(&mu);
     while (!qn) pthread_cond_wait(&cv, &mu);

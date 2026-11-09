@@ -282,18 +282,24 @@ void net_pump(void) {
   }
 }
 unsigned char *net_fetch_sync(const char *url, size_t *len, int *status, int timeoutMs) { return net_fetch_sync_hdr(url, NULL, len, status, timeoutMs); }
+/* a thread that fetches many small things from the same few hosts (the picture workers) keeps one handle: a new TLS connection per poster
+   took the TV's connections down when a long Home was scrolled (curl 7, couldn't connect). Bounded like the other kept handles. */
+static __thread int thKeep; static __thread CURL *thH;
+void net_keep_this_thread(void) { thKeep = 1; }
 unsigned char *net_fetch_sync_hdr(const char *url, const char *hdr, size_t *len, int *status, int timeoutMs) {
   Req r; memset(&r, 0, sizeof r); r.url = (char *)url;
-  CURL *c = f_easy_init(); if (!c) { *status = 0; *len = 0; return NULL; }
+  int kept = thKeep && f_easy_reset; CURL *c; if (kept) { c = thH; if (c) f_easy_reset(c); else c = thH = f_easy_init(); } else c = f_easy_init();
+  if (!c) { *status = 0; *len = 0; return NULL; }
+  if (kept) { f_easy_setopt(c, CURLOPT_MAXCONNECTS, (long)(keepConns ? keepConns : 2)); f_easy_setopt(c, CURLOPT_DNS_CACHE_TIMEOUT, 300L); }
   struct curl_slist *hs = hdr ? f_slist_append(NULL, hdr) : NULL; if (hs) f_easy_setopt(c, CURLOPT_HTTPHEADER, hs);
   f_easy_setopt(c, CURLOPT_URL, url); f_easy_setopt(c, CURLOPT_WRITEFUNCTION, on_data); f_easy_setopt(c, CURLOPT_WRITEDATA, &r);
   f_easy_setopt(c, CURLOPT_FOLLOWLOCATION, 1L); f_easy_setopt(c, CURLOPT_MAXREDIRS, 8L); f_easy_setopt(c, CURLOPT_NOSIGNAL, 1L);
   f_easy_setopt(c, CURLOPT_CONNECTTIMEOUT_MS, 8000L); f_easy_setopt(c, CURLOPT_TIMEOUT_MS, (long)timeoutMs);
   f_easy_setopt(c, CURLOPT_USERAGENT, ua()); f_easy_setopt(c, CURLOPT_ACCEPT_ENCODING, "");
   if (caPath[0]) f_easy_setopt(c, CURLOPT_CAINFO, caPath);
-  CURLcode rc = f_easy_perform(c); long code = 0; f_easy_getinfo(c, CURLINFO_RESPONSE_CODE, &code); f_easy_cleanup(c); if (hs) f_slist_free_all(hs);
+  CURLcode rc = f_easy_perform(c); long code = 0; f_easy_getinfo(c, CURLINFO_RESPONSE_CODE, &code); if (kept) net_stats(c); else f_easy_cleanup(c); if (hs) f_slist_free_all(hs);
   *status = rc == CURLE_OK ? (int)code : 0; *len = r.len;
-  if (*status != 200 && *status != 206) { free(r.body); return NULL; }
+  if (*status != 200 && *status != 206) { { static unsigned nf; if (nf++ < 200 || nf % 50 == 0) fprintf(stderr, "[net] fetch failed: curl %d, http %ld, %zu bytes\n", (int)rc, code, r.len); } free(r.body); return NULL; }
   return r.body;
 }
 

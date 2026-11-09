@@ -2,6 +2,8 @@
 #include "core/collections.h"
 #include "core/app.h"
 #include "core/i18n.h"
+#include "core/applog.h"
+#include "core/logseal.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -28,7 +30,7 @@
 #define MAX_CONN 8
 
 static pthread_mutex_t mu = PTHREAD_MUTEX_INITIALIZER;
-static int alive, stopReq, nconn; static double deadline;
+static int alive, stopReq, nconn, netLogs; static double deadline; /* netLogs: the "Logs over the network" setting, pushed by the main thread (store_get is not for this thread) */
 static char tok[17];
 static struct { int seq; char text[400]; } typed;
 static unsigned hits;
@@ -193,10 +195,15 @@ static void handle(int fd) {
   const char *rest = NULL;
   if (!strncmp(target, "/t/", 3) && strlen(target) >= 19 && !strncmp(target + 3, tok, 16)) {
     rest = target + 19;
-    if (*rest && strcmp(rest, "/q") && strcmp(rest, "/tmdb") && strcmp(rest, "/tmdb/set") && strcmp(rest, "/trakt") && strcmp(rest, "/trakt/set") && strcmp(rest, "/collections") && strcmp(rest, "/collections/set") && strcmp(rest, "/collections/clear")) rest = NULL; }
+    if (!strcmp(rest, "/logs")) { pthread_mutex_lock(&mu); int on = netLogs; pthread_mutex_unlock(&mu); if (!on) rest = NULL; }
+    else if (*rest && strcmp(rest, "/q") && strcmp(rest, "/tmdb") && strcmp(rest, "/tmdb/set") && strcmp(rest, "/trakt") && strcmp(rest, "/trakt/set") && strcmp(rest, "/collections") && strcmp(rest, "/collections/set") && strcmp(rest, "/collections/clear")) rest = NULL; }
+  if (!rest && !post && !strcmp(target, "/logs")) { pthread_mutex_lock(&mu); if (netLogs) rest = "/logs"; pthread_mutex_unlock(&mu); } /* the log has a plain address too: the token changes at every launch, and a test script must find it by itself */
   if (!rest || post != (!strcmp(rest, "/collections/set") || !strcmp(rest, "/collections/clear"))) { reply(fd, 404, NULL, NULL, 0); return; }
   if (!strcmp(rest, "/collections/set")) { col_set(fd, req + bodyAt, got - bodyAt, want); return; }
   if (!strcmp(rest, "/collections/clear")) { char *e = calloc(1, 1); pthread_mutex_lock(&mu); free(colPend); colPend = e; pthread_mutex_unlock(&mu); reply(fd, 204, NULL, NULL, 0); return; }
+  if (!strcmp(rest, "/logs")) { /* the kept log, scrubbed as Share logs scrubs it; ?tail=N for the last N lines */
+    char n[16]; qparam(q, "tail", n, sizeof n); char *raw = applog_text(atoi(n)), *txt = raw ? logscrub_share(raw) : NULL; free(raw);
+    reply(fd, 200, "Content-Type: text/plain; charset=utf-8\r\n", txt ? txt : "", txt ? strlen(txt) : 0); free(txt); return; }
   if (strcmp(rest, "/q") && strcmp(rest, "/tmdb/set") && strcmp(rest, "/trakt/set")) { pthread_mutex_lock(&mu); hits++; pthread_mutex_unlock(&mu); } /* a code was opened */
   if (!strcmp(rest, "/tmdb/set") || !strcmp(rest, "/trakt/set")) {
     char key[1024]; qparam(q, "key", key, sizeof key);
@@ -236,7 +243,7 @@ static void *srv_main(void *arg) {
   int lfd = (int)(size_t)arg;
   for (;;) {
     pthread_mutex_lock(&mu);
-    if (stopReq || mono() > deadline) { close(lfd); alive = 0; pthread_mutex_unlock(&mu); return NULL; } /* closed before it says so: a new start can bind again */
+    if (stopReq || (!netLogs && mono() > deadline)) { close(lfd); alive = 0; pthread_mutex_unlock(&mu); return NULL; } /* closed before it says so: a new start can bind again */
     pthread_mutex_unlock(&mu);
     struct pollfd p = { lfd, POLLIN, 0 }; /* woken every half second to see whether it should go */
     if (poll(&p, 1, 500) <= 0 || !(p.revents & POLLIN)) continue;
@@ -263,6 +270,11 @@ int httpd_start(void) {
   int bad = pthread_create(&t, &at, srv_main, (void *)(size_t)fd); pthread_attr_destroy(&at);
   if (bad) { close(fd); pthread_mutex_lock(&mu); alive = 0; pthread_mutex_unlock(&mu); return 0; }
   return 1;
+}
+/* the setting changed (or the app just started with it on): while on, the server stays up and answers /logs, with no idle end */
+void httpd_net_logs(int on) {
+  pthread_mutex_lock(&mu); netLogs = on != 0; pthread_mutex_unlock(&mu);
+  if (on) httpd_start();
 }
 /* the first IPv4 address that is up and not the loopback (nor a self-assigned 169.254 one) */
 static int lan_ip(char *out, size_t cap) {

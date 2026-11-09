@@ -61,7 +61,7 @@ static const Opt ACCENT_OPTS[] = { { "logo", "From the logo" }, { "adaptive", "F
 #define NCAT 10
 #define MAXROWS 48
 static Setting recsS[10];
-static Setting playBase[8], playS[8], subsS[6], audS[5], lookS[2], langS[2], keyS[5], addonS[40], acctS[1], supS[6];
+static Setting playBase[8], playS[8], subsS[6], audS[5], lookS[2], langS[2], keyS[5], addonS[40], acctS[1], supS[7];
 static Cat cats[NCAT]; static int ncat; /* (Keys leaves when this build carries every key) */
 
 /* the layout, in the web's pixels: the grid is centred, 1600 wide, 150 from the top */
@@ -161,7 +161,16 @@ static int about_opts(void) {
   set_act(&supS[n++], "__logs", "Share logs", "Share the code and describe the issue");
   if (welcome_support_url()[0]) set_act(&supS[n++], "__support", "Support the project", "A coffee keeps it going. A star helps others find it"); /* its codes in view (sized as if last) */
   set_s(&supS[n++], "nerdStats", "Stats for nerds", "Memory, storage and frame times in a corner of the screen", OO, 2, "false"); /* under it: the list scrolls to it */
+  { Setting *s = &supS[n++]; char u[300]; /* on: the address to open, right in the description (the row is rebuilt when it changes) */
+    set_s(s, "netLogs", "Logs over the network", "For debugging: this TV's log can be read from your home network while this is on", OO, 2, "false");
+    if (!strcmp(store_get("netLogs", "false"), "true") && httpd_url("/logs", u, sizeof u)) { s->raw = 1; snprintf(s->lb, sizeof s->lb, "%s", T("Logs over the network")); snprintf(s->ds, sizeof s->ds, "%s  %s", T("For debugging: this TV's log can be read from your home network while this is on"), u); } }
   return n;
+}
+/* Logs over the network: the server follows the switch, and About's rows are rebuilt (the address shows or goes) */
+static void net_logs_set(const char *v) {
+  httpd_net_logs(!strcmp(v, "true"));
+  for (int i = 0; i < ncat; i++) if (cats[i].opts == supS) { cats[i].n = about_opts(); if (S.cat == i && S.idx >= cats[i].n) S.idx = cats[i].n - 1; }
+  S.dirty = 1;
 }
 /* Cache P2P streams on USB: a switch for the drive there (kept per drive), greyed with "No drive" when there is none */
 static unsigned usbSeen;
@@ -268,7 +277,7 @@ int settings_apply_pref(const char *k, const char *v) {
   if (!strcmp(k, "autoBest") && !strcmp(v, "true") && !best_on()) { if (!best_speed_busy()) { best_caps_probe(NULL, NULL); best_speed_run(on_speed, NULL); } return 1; } /* (on only once this TV's line is measured, as here) */
   if (!strcmp(k, "uiLang")) { store_set("uiLang", v); i18n_init(plat_asset_dir(), v); text_set_rtl(i18n_rtl()); text_gc(); board_invalidate(); /* the whole app in the phone's language, at once */
     if (SCR == SCR_SET) { int c = S.cat, i = S.idx, z = S.zone; enter(NULL); S.cat = c; S.idx = i; S.zone = z == 2 ? 1 : z; show_cat(c, 0); S.enterAt = app_now() - 10; } return 1; }
-  store_set(k, v); S.dirty = 1;
+  store_set(k, v); S.dirty = 1; if (!strcmp(k, "netLogs")) net_logs_set(v);
   if (!strcmp(k, "bingeWatch")) store_set("enableNextVideo", v);
   if (!strcmp(k, "bgTrailer")) play_layout();
   if (!strcmp(k, "accent")) accent_apply();
@@ -294,7 +303,7 @@ static void set_val(Setting *o, const char *v, int dir) {
   if (!strcmp(o->k, "autoBest") && !strcmp(v, "true") && !best_on()) { if (!best_speed_busy()) { best_caps_probe(NULL, NULL); best_speed_run(on_speed, NULL); } return; }
   if (!strcmp(o->k, "uiLang")) { if (strcmp(v, store_get("uiLang", "auto"))) { store_set("uiLang", v); i18n_init(plat_asset_dir(), v); text_set_rtl(i18n_rtl()); text_gc(); board_invalidate();
       int c = S.cat, i = S.idx, z = S.zone; enter(NULL); S.cat = c; S.idx = i; S.zone = z == 2 ? 1 : z; show_cat(c, 0); S.enterAt = app_now() - 10; } return; } /* the same place, in the new language */
-  store_set(o->k, v); S.dirty = 1;
+  store_set(o->k, v); S.dirty = 1; if (!strcmp(o->k, "netLogs")) net_logs_set(v);
   if (!strcmp(o->k, "bgTrailer")) play_layout(); /* its volume row comes and goes with it, right under it */
   if (!strncmp(o->k, "adOn_", 5)) { board_invalidate(); cats[5].n = addon_opts(); return; } /* an addon on/off here: rows, metadata and streams follow */
   if (!strcmp(o->k, "bingeWatch")) store_set("enableNextVideo", v);

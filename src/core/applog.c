@@ -180,8 +180,9 @@ static void json_str(const char *j, const char *key, char *out, size_t cap) { /*
 static long proc_kb(const char *file, const char *key) {
   char *t = read_file(file, 16384); if (!t) return -1; char *p = strstr(t, key); long v = p ? atol(p + strlen(key)) : -1; free(t); return v;
 }
-char *applog_bundle(void) {
-  Buf b = { 0 }; char ts[32], l[512]; iso_now(ts);
+/* the device lines both the Share logs bundle and the network log start with */
+static void bundle_head(Buf *bp) {
+  Buf b = *bp; char ts[32], l[512]; iso_now(ts);
   snprintf(l, sizeof l, "Stremio Origin logs - %s\n", ts); b_add(&b, l);
   snprintf(l, sizeof l, "app %s %s (build %.12s)", SB_APP_ID, update_current(), buildId + 10); b_add(&b, l);
   char *os = read_file("/var/run/nyx/os_info.json", 8192), *di = read_file("/var/run/nyx/device_info.json", 8192);
@@ -193,6 +194,10 @@ char *applog_bundle(void) {
   long rss = proc_kb("/proc/self/status", "VmRSS:"), avail = proc_kb("/proc/meminfo", "MemAvailable:");
   char rs[24] = "?", av[24] = "?"; if (rss >= 0) snprintf(rs, sizeof rs, "%ld", rss / 1024); if (avail >= 0) snprintf(av, sizeof av, "%ld", avail / 1024);
   snprintf(l, sizeof l, "\nnative · app %s MB · TV free %s MB · up %u s", rs, av, (unsigned)(SDL_GetTicks() / 1000)); b_add(&b, l);
+  *bp = b;
+}
+char *applog_bundle(void) {
+  Buf b = { 0 }; char l[512]; bundle_head(&b);
   b_add(&b, "\n\n== app ==\n");
   /* the last 400 lines of the kept file (each scrubbed again, as the helper did), else the ones in memory */
   char *f = fileFd >= 0 ? read_file(filePath, APPLOG_MAX + 65536) : NULL, *p = NULL; int lines = 0; /* (a file it could not write to: the lines in memory) */
@@ -217,6 +222,18 @@ char *applog_bundle(void) {
     for (int i = k > 60 ? k - 60 : 0; i < k; i++) { char *c = logscrub_line(lns[i % 60]); b_add(&b, c); b_add(&b, "\n"); free(c); }
     free(m); }
   return b.p;
+}
+
+/* Logs over the network: the header, then the whole kept file, each line scrubbed again (a line the file took before a
+   scrub rule existed), the last `tail` lines when tail > 0. Runs on the HTTP thread: it only reads the file (the writer
+   appends whole lines and rotate() renames over it, so a read sees an old or a new file, never a torn one) and takes no lock. */
+char *applog_text(int tail) {
+  Buf b = { 0 }; bundle_head(&b); b_add(&b, "\n\n== app ==\n");
+  char *f = filePath[0] ? read_file(filePath, APPLOG_MAX + 65536) : NULL, *p = f;
+  if (f && tail > 0) { size_t n = strlen(f); int lines = 0; p = f + n; if (p > f && p[-1] == '\n') p--; while (p > f && lines < tail) { p--; if (*p == '\n') lines++; } if (*p == '\n') p++; }
+  if (f) for (char *s = p; *s;) { char *e = strchr(s, '\n'); if (e) *e = 0; if (*s) { char *c = logscrub_line(s); b_add(&b, c); b_add(&b, "\n"); free(c); } if (!e) break; s = e + 1; }
+  else { pthread_mutex_lock(&mu); for (int i = 0; i < ringN; i++) { b_add(&b, ring[(ringHead + i) % RING]); b_add(&b, "\n"); } pthread_mutex_unlock(&mu); }
+  free(f); return b.p;
 }
 
 /* ---- Share logs: the bundle without secrets, sealed to the developer's public key below (only the matching

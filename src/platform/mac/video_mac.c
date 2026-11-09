@@ -29,6 +29,7 @@ int video_live(void) { return live; }
 int video_settling(void) { return 0; }
 int video_width(void) { return live ? vw : 0; }
 int video_height(void) { return live ? vh : 0; }
+float video_frame_rate(void) { return 0; }
 double video_fps(void) { return 0; }
 int video_hdr(char *out, int cap) { if (cap > 0) out[0] = 0; return 0; }
 /* SB_VID_AUDIO="dts:eng:6,ac3:fre:6": the file's audio tracks (codec:language:channels); SB_VID_NODTS=1: DTS and TrueHD

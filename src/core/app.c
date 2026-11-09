@@ -69,6 +69,7 @@ static int quitting;
 float app_dt(void) { return DT; }
 double app_now(void) { return NOW; }
 unsigned app_frame(void) { return FRAME; }
+unsigned anim_moves;  /* (anim.h) */
 float app_idle(void) { return (float)(NOW - lastIn); }
 static int rtlHeld; /* a picture drawn left to right and mirrored as a whole (the guide's) */
 int app_rtl(void) { return rtlHeld ? 0 : i18n_rtl(); }

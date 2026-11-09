@@ -28,6 +28,7 @@ void   video_set_volume(int pct, int easeMs);  /* the stream's volume, 0-100, re
 int    video_settling(void);                 /* 1 while a seek is on its way (asked, not yet done): the picture is not where it will be */
 int    video_width(void);
 int    video_height(void);
+float  video_frame_rate(void);   /* the frame rate the platform last reported for the video loaded now (25.0, 29.97...), 0 when none is loaded or it is unknown (always 0 off webOS) */
 double video_fps(void);          /* the picture's frame rate (23.976...), 0 while unknown */
 int    video_hdr(char *out, int cap);  /* the HDR type the TV reports for the stream playing ("DolbyVision", "HDR10", "none"...); 0 while unknown */
 int    video_audio_tracks(VidTrack *out, int max);

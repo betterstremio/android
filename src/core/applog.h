@@ -9,6 +9,8 @@
 void  applog_start(const char *dataDir);
 /* the bundle as shared, before the sharing scrub: device lines and the last 400 app lines (malloc'd) */
 char *applog_bundle(void);
+/* the whole kept log (or its last `tail` lines when tail > 0) with the bundle's device lines first, scrubbed; malloc'd. Safe off the main thread */
+char *applog_text(int tail);
 /* Share logs: seals the bundle on a worker and leaves it on the relay (a share still running, or one made in
    the last 10 minutes, answers instead) */
 int   applog_share_start(void);

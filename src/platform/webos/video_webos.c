@@ -357,6 +357,7 @@ int video_live(void) { pthread_mutex_lock(&mu); int l = S.live; pthread_mutex_un
 int video_settling(void) { return seekTarget >= 0 || (seekWait && SDL_GetTicks() - seekWaitAt < 8000); }
 int video_width(void) { return S.w; }
 int video_height(void) { return S.h; }
+float video_frame_rate(void) { pthread_mutex_lock(&mu); float f = (float)S.fps; pthread_mutex_unlock(&mu); return f; } /* (S is cleared on every unload and new load) */
 double video_fps(void) { pthread_mutex_lock(&mu); double f = S.fps; pthread_mutex_unlock(&mu); return f; }
 int video_hdr(char *out, int cap) { pthread_mutex_lock(&mu); snprintf(out, (size_t)cap, "%s", S.hdr); pthread_mutex_unlock(&mu); return out[0] != 0; }
 int video_audio_unsupported(void) { return S.audioUnsup; }

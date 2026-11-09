@@ -76,6 +76,7 @@ static void on_crash(int sig, siginfo_t *si, void *uc) {
 #endif
 #include "core/castlink.h"
 #include "core/applog.h"
+#include "core/httpd.h"
 #include "platform/plat.h"
 #include "ui/gfx.h"
 #include "ui/text.h"
@@ -253,6 +254,7 @@ int main(int argc, char **argv) {
   snprintf(p, sizeof p, "%s/cache", store_data_dir()); img_init(p); img_set_draw_scale(gfx_scale());
   if (memMb > 0) img_set_budget_mb(memMb < 1200 ? 40 : memMb < 3000 ? 128 : 192); /* pictures under the RAM the TV has (the shared atlas, backdrop and text add ~20 MB) */
   i18n_init(plat_asset_dir(), getenv("SB_LANG") ? getenv("SB_LANG") : store_get("uiLang", "auto")); /* SB_LANG=ar: development */
+  if (!strcmp(store_get("netLogs", "false"), "true")) httpd_net_logs(1); /* "Logs over the network": the server is up from the start */
   if (!text_init(plat_asset_dir(), gfx_scale())) return 1;
   text_set_rtl(i18n_rtl()); icon_init(plat_asset_dir()); sb_init();
   app_init(); player_init();
@@ -330,17 +332,21 @@ int main(int argc, char **argv) {
          quiet moment (nothing pressed for 3 s, after the start): 60 frames with the driver waiting for the screen, their
          median; then the loop paces itself again, at that rate */
 #ifndef SB_MAC
-      static int hzState = -1, hzTries; static Uint64 hzLast; static float hzIv[60]; static int hzN; static Uint32 hzNext;
-      if (hzState < 0) hzState = !vsyncOn && !getenv("SB_HZ") && !getenv("SB_PACE") ? 0 : 3;
-      if (hzState == 0 && frame > 300 && SDL_GetTicks() >= hzNext && app_idle() > 3 && !player_open()) { int q, w; img_queue_stats(&q, &w); if (q || w) goto hzDone; /* (pictures still coming: not quiet) */ hzState = 1; hzLast = 0; hzN = 0; SDL_GL_SetSwapInterval(1); }
+      static int hzState = -1, hzTries, baseHz = 60, curHz = 60, follow; static Uint64 hzLast; static float hzIv[60]; static int hzN; static Uint32 hzNext;
+      if (hzState < 0) { hzState = !vsyncOn && !getenv("SB_HZ") && !getenv("SB_PACE") ? 0 : 3; follow = hzState == 0; }
+      if (hzState == 0 && frame > 300 && SDL_GetTicks() >= hzNext && app_idle() > 3 && !player_open() && video_state() == VID_IDLE) { int q, w; img_queue_stats(&q, &w); if (q || w) goto hzDone; /* (pictures still coming: not quiet) */ hzState = 1; hzLast = 0; hzN = 0; SDL_GL_SetSwapInterval(1); }
       else if (hzState == 1) { Uint64 c = SDL_GetPerformanceCounter(); if (hzLast) hzIv[hzN++] = (float)((double)(c - hzLast) * 1000.0 / (double)SDL_GetPerformanceFrequency()); hzLast = c;
-        if (app_idle() < 0.5f) { hzState = 0; SDL_GL_SetSwapInterval(0); } /* a key: measured again at the next quiet moment */
+        if (app_idle() < 0.5f || video_state() != VID_IDLE) { hzState = 0; SDL_GL_SetSwapInterval(0); } /* a key or a video (a clip makes the TV run at 50): measured again at the next quiet moment */
         else if (hzN == 60) { hzState = 2; SDL_GL_SetSwapInterval(0);
           for (int i = 1; i < hzN; i++) { float x = hzIv[i]; int j = i - 1; while (j >= 0 && hzIv[j] > x) { hzIv[j + 1] = hzIv[j]; j--; } hzIv[j + 1] = x; }
           float med = hzIv[hzN / 4], best = 1e9f; /* (the quicker quarter: a frame that waits on the app is not the screen) */ static const int R[] = { 48, 50, 60 }; int hz = 0;
           for (int i = 0; i < 3; i++) { float d = fabsf(1000.0f / R[i] - med); if (d < best && d < 0.6f) { best = d; hz = R[i]; } }
-          fprintf(stderr, "[pace] frames reach the screen every %.1f ms (%.1f to %.1f)\n", med, hzIv[hzN / 10], hzIv[hzN - 1 - hzN / 10]); if (hz) pace_set_hz(hz); else if (++hzTries < 30) { hzState = 0; hzNext = SDL_GetTicks() + 20000; } } } /* (no rate matched: something was still busy; again in 10 s) */
+          fprintf(stderr, "[pace] frames reach the screen every %.1f ms (%.1f to %.1f)\n", med, hzIv[hzN / 10], hzIv[hzN - 1 - hzN / 10]); if (hz) { pace_set_hz(hz); baseHz = curHz = hz; } else if (++hzTries < 30) { hzState = 0; hzNext = SDL_GetTicks() + 20000; } } } /* (no rate matched: something was still busy; again in 10 s) */
       hzDone:;
+      /* a 25 or 50 fps clip makes a 60 Hz TV run its screen at 50: the app follows it while the clip is loaded (the
+         other rates leave the screen at 60); one comparison a frame, pace only hears of a change */
+      if (follow) { float vf = video_frame_rate(); int want = baseHz == 60 && ((vf > 24.9f && vf < 25.1f) || (vf > 49.9f && vf < 50.1f)) ? 50 : baseHz;
+        if (want != curHz) { curHz = want; pace_set_hz(want); if (want != baseHz) fprintf(stderr, "[pace] a %.0f fps clip is playing: the app at %d\n", vf, want); else fprintf(stderr, "[pace] back at %d\n", want); } }
 #endif
     }
     { static int first = 1, ms = 30; if (first) { first = 0; ms = getenv("SB_PROF_MS") ? atoi(getenv("SB_PROF_MS")) : 30; if (profSlow) profMark = 0; } /* start-up is not a frame */

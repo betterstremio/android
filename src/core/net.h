@@ -37,6 +37,7 @@ void     net_json_free(struct cJSON *j);   /* a parsed answer freed off the draw
 int      net_pending(void);
 /* synchronous fetch for worker threads of other modules (images); returns malloc'd body or NULL */
 unsigned char *net_fetch_sync(const char *url, size_t *len, int *status, int timeoutMs);
+void net_keep_this_thread(void);   /* this worker's net_fetch_sync calls reuse their connections */
 /* the same with one extra request header ("Authorization: Bearer ..."), NULL for none */
 unsigned char *net_fetch_sync_hdr(const char *url, const char *extraHeader, size_t *len, int *status, int timeoutMs);
 

@@ -27,7 +27,7 @@
 #include "platform/plat.h"
 #include "core/bgtrailer.h"
 
-#define MAXROWS 32
+#define MAXROWS 64 /* (a catalog answer packs its row in 6 bits: 64 is the most) */
 #define SPOT_ROW 255                 /* (a details answer for a spotlight title, in place of its row) */
 #define ROWS_TOP 478.0f             /* a focused row ends ~80 px above the bottom edge */
 #define HERO_X 48.0f
@@ -62,6 +62,7 @@ typedef struct { char title[96]; ItemList items; int col, wide, label, hidden, c
   CatalogDef def; int hasDef, skipAt, more, paging; double pageAt;
   /* a collection's row: tiles, not titles (no Item, so no details, trailer or hold menu come near them) */
   const ColFolder *tiles; int ntiles; int answered;
+  int recsIdx, nrec; /* a For You row: its row in recs.c (-1 other rows) and its card count; its items are loaded only near the focus (rows_window) */
   int rank; float extra; /* rank: a Top 10 row (numerals); extra: the details under the open card (cinematic Home) */ } Row;
 #define NFEAT 8
 /* what the hero shows: put in while it is invisible, all together */
@@ -70,7 +71,7 @@ typedef struct { char id[64], name[256], metaName[256], metaLine[96], desc[1024]
 typedef struct { unsigned ver, lg; int spot, discName, discDesc, homeName; MetaParts mp; } HeroLay;
 typedef struct {
   int kind;                       /* 0 home, 1 disc */
-  Row rows[MAXROWS]; int n, rowIdx, built; unsigned gen, libVer;
+  Row rows[MAXROWS]; int n, rowIdx, built, winRow; unsigned gen, libVer;
   /* Discover's spotlight: this year's films and the trending series, alternating; it moves on every 4 s */
   Item feat[NFEAT]; int nfeat, featIdx, featOn, featLoad, featGotM, featGotS; ItemList featM, featS; double featAt;
   Tween spotY, rowsA, spotA, dotsA, dotW[NFEAT]; int heroSpot, dotsWant; double dotsGo; char scoped[64];
@@ -107,6 +108,7 @@ static float step_of(const Row *r) { return card_w(r) + RGAP + (r->rank ? RANK_W
 #define CARD_OPEN_W 800.0f /* 16:9 at a poster's height */
 #define WIDE_SM_W 320
 #define WIDE_SM_H 180
+static int row_n(const Row *r) { return r->recsIdx >= 0 ? r->nrec : r->items.n; } /* (a For You row far away has no items loaded: its count is known all the same) */
 static int see_all(const Row *r) { return r->hasDef && r->def.skip && r->items.n > 0 && !r->more; }
 static int col_last(const Row *r) { return r->ntiles ? r->ntiles - 1 : r->items.n - 1 + see_all(r); }
 static const ColFolder *tile_cur(const Board *b) { if (b->rowIdx < 0 || b->rowIdx >= b->n) return NULL; const Row *r = &b->rows[b->rowIdx]; return r->ntiles && r->col < r->ntiles ? &r->tiles[r->col] : NULL; }
@@ -128,7 +130,7 @@ static void prep_free(Row *r) { free(r->cp); free(r->cpSt); r->cp = NULL; r->cpS
 static void row_clear(Row *r) { itemlist_clear(&r->items); prep_free(r); }
 static Row *row_add(Board *b, const char *title, int wide, int label) {
   if (b->n >= MAXROWS) return NULL; Row *r = &b->rows[b->n++]; row_clear(r); memset(r, 0, sizeof *r); prep_free(r);
-  snprintf(r->title, sizeof r->title, "%s", title); r->wide = wide; r->label = label; r->hidden = 1; r->closing = 0; r->hk = 1; r->popCol = -1; tween_set(&r->off, 0); tween_set(&r->a, 1); return r;
+  snprintf(r->title, sizeof r->title, "%s", title); r->wide = wide; r->label = label; r->hidden = 1; r->closing = 0; r->hk = 1; r->recsIdx = -1; r->popCol = -1; tween_set(&r->off, 0); tween_set(&r->a, 1); return r;
 }
 static void slide_row(Row *r) {
   float w = step_of(r); int vis = (int)((SB_W - 96) / w);
@@ -181,11 +183,20 @@ static void col_disc_rows(Board *b, int keep, const int *oldCols) {
   const ColSet *s = colstore();
   for (int pass = 1; pass >= 0; pass--) for (int i = 0; i < s->n; i++) { const Collection *c = &s->c[i]; if (!c->pinTop != !pass || !c->nfolders) continue; Row *r = row_add(b, c->title, c->folders[0].shape == COL_LANDSCAPE, 0); if (!r) return; r->tiles = c->folders; r->ntiles = c->nfolders; r->hidden = 0; if (keep && oldCols[r - b->rows] < r->ntiles) r->col = oldCols[r - b->rows]; }
 }
-/* Home's For You rows (recs.c): because-you-watched, then the region's Top 10 movies and series */
-static void recs_rows(Board *b) {
-  ItemList l; char t[160];
-  if (recs_because(&l, t, sizeof t) > 0) { Row *r = row_add(b, t, 0, 0); if (r) { r->items = l; r->hidden = 0; } else itemlist_clear(&l); } else itemlist_clear(&l);
-  for (int s = 0; s < 2; s++) { if (recs_top10(s, &l, t, sizeof t) > 0) { Row *r = row_add(b, t, 0, 0); if (r) { r->items = l; r->hidden = 0; r->rank = 1; } else itemlist_clear(&l); } else itemlist_clear(&l); }
+/* Home's For You rows (recs.c): only their titles and counts here; the cards are loaded near the focus (rows_window) */
+static void home_recs_rows(Board *b) {
+  char t[160]; int rk, cnt;
+  for (int i = 0, n = recs_rows(); i < n; i++) { if (!recs_row_info(i, t, sizeof t, &rk, &cnt) || cnt <= 0) continue; Row *r = row_add(b, t, 0, 0); if (!r) break; r->hidden = 0; r->rank = rk; r->recsIdx = i; r->nrec = cnt; }
+}
+/* the window: a For You row holds its cards only within WIN_LOAD rows of the focus and lets them go beyond WIN_DROP (the gap stops thrashing);
+   run when the focused row changes and after a rebuild, not every frame (a load is a memcpy of 20 Items) */
+#define WIN_LOAD 3
+#define WIN_DROP 6
+static void row_load(Row *r) { if (r->recsIdx < 0 || r->items.n) return; recs_row_items(r->recsIdx, &r->items); r->nrec = r->items.n; if (r->col >= r->items.n) r->col = r->items.n ? r->items.n - 1 : 0; }
+static void rows_window(Board *b) {
+  b->winRow = b->rowIdx; if (b->kind != 0) return;
+  for (int i = 0; i < b->n; i++) { Row *r = &b->rows[i]; if (r->recsIdx < 0) continue; int d = abs(i - b->rowIdx);
+    if (d <= WIN_LOAD) row_load(r); else if (d > WIN_DROP && r->items.n) { itemlist_clear(&r->items); prep_free(r); } }
 }
 /* the billboard's titles: the Top picks (none: no billboard, Home as before) */
 static void bill_fill(Board *b, int first) {
@@ -203,8 +214,8 @@ static void load_catalog_rows(Board *b, int disc, int keep) {
   int oldRow = b->rowIdx, oldCols[MAXROWS] = { 0 }; /* (rows new since: at their start) */ for (int i = 0; i < b->n; i++) oldCols[i] = b->rows[i].col;
   Item *was = NULL; int nwas = 0; /* Continue Watching as it was, to find one taken out of it */
   if (keep && !disc && b->n && !strcmp(b->rows[0].title, "Continue Watching") && b->rows[0].items.n) { nwas = b->rows[0].items.n; was = malloc(sizeof(Item) * (size_t)nwas); if (was) memcpy(was, b->rows[0].items.items, sizeof(Item) * (size_t)nwas); else nwas = 0; }
-  for (int i = 0; i < b->n; i++) row_clear(&b->rows[i]); b->n = 0; b->gen++;
-  if (!disc) { b->cine = b->kind == 0 && strcmp(store_get("homeLayout", "cinematic"), "classic"); bill_fill(b, !keep); board_cw_row(b); recs_rows(b); }
+  for (int i = 0; i < b->n; i++) row_clear(&b->rows[i]); b->n = 0; b->gen++; b->winRow = -1;
+  if (!disc) { b->cine = b->kind == 0 && strcmp(store_get("homeLayout", "cinematic"), "classic"); bill_fill(b, !keep); board_cw_row(b); home_recs_rows(b); }
   if (!disc && !was) pinned_rows(b);
   if (was) { Row *r = b->n && !strcmp(b->rows[0].title, "Continue Watching") ? &b->rows[0] : NULL;
     if (r && r->items.n == nwas - 1) for (int i = 0; i < nwas; i++) { int in = 0; for (int j = 0; j < r->items.n && !in; j++) in = !strcmp(r->items.items[j].id, was[i].id);
@@ -215,7 +226,7 @@ static void load_catalog_rows(Board *b, int disc, int keep) {
   if (disc) col_disc_rows(b, keep, oldCols);
   CatalogDef defs[12]; int nd = disc ? sb_disc_defs(defs, 12) : sb_home_defs(defs, 12);
   for (int d = 0; d < nd; d++) { Row *r = row_add(b, defs[d].title, 0, 0); if (!r) break; int ri = (int)(r - b->rows); if (keep && ri < MAXROWS) r->col = oldCols[ri]; r->def = defs[d]; r->hasDef = 1; sb_catalog(&defs[d], on_catalog, tok(b, ri)); }
-  if (keep) { b->rowIdx = oldRow < b->n ? oldRow : (b->n ? b->n - 1 : 0); if (b->rowIdx < b->n && b->rows[b->rowIdx].closing) { int nx = first_visible_row(b, b->rowIdx + 1, 1); if (nx >= 0) b->rowIdx = nx; } /* (never on the row closing) */ for (int j = 0; j < b->n; j++) { Row *r = &b->rows[j]; if (r->items.n && r->col >= r->items.n) r->col = r->items.n - 1; } }
+  if (keep) { b->rowIdx = oldRow < b->n ? oldRow : (b->n ? b->n - 1 : 0); if (b->rowIdx < b->n && b->rows[b->rowIdx].closing) { int nx = first_visible_row(b, b->rowIdx + 1, 1); if (nx >= 0) b->rowIdx = nx; } /* (never on the row closing) */ for (int j = 0; j < b->n; j++) { Row *r = &b->rows[j]; if (row_n(r) && r->col >= row_n(r)) r->col = row_n(r) - 1; } }
   else b->rowIdx = 0;
 }
 /* ---- the spotlight's own picks: this year's new films and the trending series, alternating (not the first row again) ---- */
@@ -526,7 +537,7 @@ static void hero_draw(Board *b) {
 /* ---- the screen ---- */
 static void board_enter_k(Board *b) {
   int fresh = !b->built || (b->kind == 0 && (b->libVer != lib_version() || b->recsVer != recs_version())), keep = b->n > 0;
-  if (fresh) { b->built = 1; b->libVer = lib_version(); load_catalog_rows(b, b->kind == 1, keep); }
+  if (fresh) { b->built = 1; b->libVer = lib_version(); load_catalog_rows(b, b->kind == 1, keep); rows_window(b); }
   if (spotk(b)) { feat_fill(b); feat_arm(b); if (spotOn(b) && (b->nfeat > 0 || b->featLoad)) { tween_set(&b->spotY, b->kind == 0 ? HOME_SPOT_DY : 144); tween_set(&b->rowsA, b->kind == 1 ? 0.5f : 1); if (b->kind == 0) { tween_set(&b->spotA, 1); tween_set(&b->topY, ROWS_TOP); } } } /* arriving on the spotlight: the rows start where they will rest (no slide down after) */
   if (app_splash_done) timer_start(&b->fade, 0.5f); /* every switch to this tab: the rows rise in one after another (row_in) */
   for (int i = 0; i < b->n; i++) { slide_row(&b->rows[i]); tween_set(&b->rows[i].off, b->rows[i].off.to); }
@@ -592,7 +603,7 @@ static int board_key(Board *b, int k) {
     if (k == K_OK) { const Item *it = focused_of(b); if (it) app_open_item(it); return 1; }
     return k != K_BACK; }
   if (!b->n || b->rowIdx >= b->n) { if (k == K_UP) topnav_focus(); return k != K_BACK; } /* (no rows: Back still leaves) */
-  Row *r = &b->rows[b->rowIdx];
+  Row *r = &b->rows[b->rowIdx]; row_load(r); /* (the window has it loaded already: this is for a focus that landed some other way) */
   if (k == K_RIGHT) move_h(b, 1);
   else if (k == K_LEFT) move_h(b, -1);
   else if (k == K_DOWN) { int n = first_visible_row(b, b->rowIdx + 1, 1); if (n >= 0) { b->rowIdx = n; hero_soon(b, 150); } else nudge_start(&r->nudge, K_DOWN); }
@@ -619,6 +630,7 @@ static void board_tick(float dt) {
   timer_tick(&b->fade, dt); nudge_tick(&b->nudge, dt);
   if (b->kind == 0) { static unsigned ser; if (store_serial() != ser) { ser = store_serial(); int c = strcmp(store_get("homeLayout", "cinematic"), "classic") != 0; if (c != b->cine) board_rebuild(); } } /* Settings > Home layout */
   if (b->kind == 0 && b->recsVer != recs_version()) { b->recsVer = recs_version(); board_rebuild(); }
+  if (b->kind == 0 && b->winRow != b->rowIdx) rows_window(b); /* (the focused row changed) */
   if (b->kind == 0) { /* the focused row's details make room under it; the rows dock under the bar */
     int fo = focusOn(b); for (int i = 0; i < b->n; i++) b->rows[i].extra = b->cine && fo && i == b->rowIdx && b->rows[i].items.n && !b->rows[i].wide && !b->rows[i].ntiles ? CINE_DET_H : 0;
     tween_to(&b->topY, b->cine && !spotOn(b) && !(b->bill && topNav.active && !b->rowIdx) ? CINE_TOP : ROWS_TOP, 0.32f, EASE_WEB); tween_tick(&b->topY, dt); }
@@ -869,7 +881,8 @@ void board_rebuild(void) {
   load_catalog_rows(b, b->kind == 1, 0);
   b->rowIdx = 0;
   for (int j = 0; j < b->n; j++) { Row *r = &b->rows[j];
-    for (int i = 0; i < n; i++) if (!strcmp(titles[i], r->title)) { r->col = cols[i]; if (r->items.n && r->col >= r->items.n) r->col = r->items.n - 1; if (r->ntiles && r->col >= r->ntiles) r->col = r->ntiles - 1; if (i == ri) b->rowIdx = j; break; } }
+    for (int i = 0; i < n; i++) if (!strcmp(titles[i], r->title)) { r->col = cols[i]; if (row_n(r) && r->col >= row_n(r)) r->col = row_n(r) - 1; if (r->ntiles && r->col >= r->ntiles) r->col = r->ntiles - 1; if (i == ri) b->rowIdx = j; break; } }
+  rows_window(b);
   for (int i = 0; i < b->n; i++) { slide_row(&b->rows[i]); tween_set(&b->rows[i].off, b->rows[i].off.to); }
   hero_soon(b, 70);
 }

@@ -60,6 +60,11 @@ int bgt_clip(void) { return clip; }
 int bgt_fast(void) { return clip || quick; }
 double bgt_clip_seek(double dur) { if (dur <= 0) return 0; double t = clipAbs > 0 ? clipAbs : dur * clipFrac; if (t > dur * 0.5) t = dur * 0.3; return t; }
 double bgt_clip_start(void) { return clipAbs > 0 ? clipAbs : 1080; } /* (a series: its fixed place; a film: 18 minutes, 15% of a two-hour one) */
+/* The TV's pipeline teardown/creation blocks its compositor for 40-60 ms: it may only land when the screen is still (no tween
+   moved for ~2 frames) and no key just came; if things keep moving it goes ahead anyway after STILL_WAIT_MAX more seconds. */
+#define STILL_MIN 0.04     /* about 2 frames without a moving tween */
+#define STILL_WAIT_MAX 0.35
+static unsigned seenMoves; static double lastMove, waitFrom, waitLast, swapAt = -9;
 static double now_s(void) { struct timespec t; clock_gettime(CLOCK_MONOTONIC, &t); return t.tv_sec + t.tv_nsec / 1e9; }
 
 void bgt_init(const BgtHooks *h) { if (h) H = *h; }
@@ -188,16 +193,26 @@ static void try_start(const BgtView *v) {
   clip = 0;
   st = S_META; sb_meta(ttype, tid, on_meta, (void *)(uintptr_t)++gen);
 }
+/* the usual moment for a swap has come (what: "unload" / "load"): true when the screen is still, or the cap is hit; the next call within 0.25 s is the same swap */
+static int swap_ok(const BgtView *v, double t, const char *what) {
+  if (t - swapAt < 0.25) return 1;
+  if (t - waitLast > 0.1) waitFrom = t; waitLast = t;
+  double still = t - lastMove, waited = t - waitFrom;
+  if (still < STILL_MIN && waited < STILL_WAIT_MAX) return 0;
+  fprintf(stderr, "[btr] swap (%s) +%.2f s after the key, still for %.2f s, waited %.2f s%s\n", what, v->idle, still, waited, still < STILL_MIN ? " (cap hit)" : "");
+  swapAt = t; waitFrom = waitLast = 0; return 1;
+}
 void bgt_tick(const BgtView *v) {
   double t = now_s();
-  if (st == S_GONE && t >= hiddenAt && (v->idle >= 0.42f || t - hiddenAt >= 4)) { /* (0.42: just after a card has finished opening) */ st = S_OFF; if (H.unload) H.unload(H.ud); }
+  if (anim_moves != seenMoves) { seenMoves = anim_moves; lastMove = t; }
+  if (st == S_GONE && t >= hiddenAt && (v->idle >= 0.42f || t - hiddenAt >= 4) && swap_ok(v, t, "unload")) { /* (0.42: just after a card has finished opening) */ st = S_OFF; if (H.unload) H.unload(H.ud); }
   int can = v->browsing && v->focused && !v->blocked && !v->spotlight && !v->shedding && !getenv("SB_NOBTR"), isClip = can && clip_for(v->focused), isQuick = can && imdb_for(v->focused);
   if (isQuick && v->idle > 0.1f && strcmp(qFocus, v->focused->id)) { /* settled on a new card: its clip and the ones around it, in one request */
     snprintf(qFocus, sizeof qFocus, "%s", v->focused->id); settleAt = v->idle > 5 ? t : t - v->idle;
     trailer_clips_want(v->focused->id); if (v->next) trailer_clips_want(v->next->id);
     for (int i = 0; i < v->nnear; i++) if (v->near[i]) trailer_clips_want(v->near[i]->id); }
   if (isQuick && !idleOn && st == S_OFF && v->idle > QUICK_IDLE) { char qu[SB_URL_MAX], qn[64]; int qc = 0;
-    if (trailer_clip_ready(v->focused->id, v->hero, qu, sizeof qu, &qc, qn, sizeof qn) > 0) { /* nothing to wait for: it plays now */
+    if (trailer_clip_ready(v->focused->id, v->hero, qu, sizeof qu, &qc, qn, sizeof qn) > 0 && swap_ok(v, t, "load")) { /* nothing to wait for: it plays now */
       idleOn = 1; snprintf(tid, sizeof tid, "%s", v->focused->id); snprintf(ttype, sizeof ttype, "%s", v->focused->type); clip = 0; quick = 1; gen++; st = S_LOAD; memAt = t + 10; qLoadAt = t;
       fprintf(stderr, "[btr] %s %s: %s, %d MB free\n", qc ? "imdb clip" : "imdb trailer", tid, qn, plat_mem_free_mb());
       if (H.load) H.load(qu, "video/mp4", tid, H.ud); return; } }
@@ -207,7 +222,7 @@ void bgt_tick(const BgtView *v) {
   for (int k = 0; k < 2; k++) if (SL[k].id[0] && !SL[k].resolving && pick_ready(&SL[k], t)) pick_resolve(&SL[k], k);    /* picked: resolved now */
   if (isClip && CP.resolved && v->next && clip_for(v->next) && v->idle > PREFETCH_IDLE + 0.3f) clip_search(v->next, 1);  /* then the card to its right */
   /* the clip goes once its link is resolved (or resolving gave up, or took too long) */
-  if (clip && st == S_FIND && !strcmp(CP.id, tid) && CP.pickAt > 0 && (CP.resolved || (CP.resolving && CP.failed >= CP.resolving) || t - CP.pickAt > RESOLVE_MAX)) clip_go(t);
+  if (clip && st == S_FIND && !strcmp(CP.id, tid) && CP.pickAt > 0 && (CP.resolved || (CP.resolving && CP.failed >= CP.resolving) || t - CP.pickAt > RESOLVE_MAX) && swap_ok(v, t, "load")) clip_go(t);
   else if (clip && st == S_FIND && !strcmp(CP.id, tid) && CP.score[0] <= 0 && (CP.done || t - CP.askedAt > 6 || (CP.firstAt && t - CP.firstAt > 1.5))) clip_go(t); /* nothing suits: the trailer (1.5 s after the first answer: the addons that answer have answered by then, the rest are the ones that never do) */
   if (clip && st == S_SHOW && showAt && t - showAt > CLIP_SECONDS) { fprintf(stderr, "[btr] clip: %d s shown, the card goes back\n", CLIP_SECONDS); stop_soft(); }
   if (quick && st == S_SHOW && showAt && t - showAt > QUICK_SECONDS) { fprintf(stderr, "[btr] %d s shown, the card goes back\n", QUICK_SECONDS); stop_soft(); }

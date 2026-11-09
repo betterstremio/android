@@ -1,7 +1,10 @@
 /* "For You": recommendations from the watch history, with the user's own TMDB key (recs_core.c does the maths).
-   Main thread only, never blocks on the network: recs_tick() runs a small request queue (3 at a time, started
-   a few seconds after launch so Home's own rows go first), TMDB answers are cached on disk (lists 24 h, Top 10
-   12 h, id lookups for good) and the finished lists are kept too, so Home shows them at once on the next launch.
+   recs_tick() and every getter are for the main thread and never block on the network or the disk: ONE worker thread owned
+   by recs.c does every file read, JSON parse, ranking, page build and file write; the main thread only decides when,
+   sends the TMDB requests the worker asks for (3 at a time, started well after launch so Home's own rows go first) and swaps
+   in the page the worker finished. TMDB answers are cached on disk (lists 12-24 h, seed details 7 days), the IMDb ids in
+   their own file (recsids.bin), and the finished page too (recspage.bin: it appears at once on the next launch, read by the
+   worker, nothing is parsed on the main thread). What stays in memory is one compact page (about 250 KB for 36 rows).
    Without a TMDB key, or with Settings > Recommendations off, everything here is empty and nothing is asked. */
 #ifndef SB_RECS_H
 #define SB_RECS_H
@@ -11,8 +14,10 @@ void     recs_tick(void);
 unsigned recs_version(void);              /* bumps when the lists below change: Home rebuilds */
 /* copies (free with itemlist_clear); 0 when there is nothing */
 int  recs_billboard(ItemList *out);       /* Top picks: the rotating billboard, 8 at most */
-int  recs_because(ItemList *out, char *title, size_t cap);   /* "Because you watched <title>" */
-int  recs_top10(int series, ItemList *out, char *title, size_t cap); /* "Top 10 movies in India this week" */
+/* the "For You" rows below the billboard (up to 36 of up to 20 cards, 20 rows on a small device): Home keeps only the few near the focus loaded */
+int  recs_rows(void);                     /* how many rows the page has now (changes only with recs_version()) */
+int  recs_row_info(int i, char *title, size_t cap, int *rank, int *count); /* 1 if row i exists: its title, a Top 10 row (numerals), its card count */
+int  recs_row_items(int i, ItemList *out); /* row i's cards inflated into Items (free with itemlist_clear); the count. Only the cards whose IMDb id is known now: a row grows by itself the next time it is asked for */
 int  recs_rank_of(const Item *it);        /* 1-10 in a Top 10 row (for its numeral), else 0 */
 int  recs_badges(const Item *it);         /* RECS_NEW | RECS_LOVE: the wide card's badges */
 enum { RECS_NEW = 1, RECS_LOVE = 2 };

@@ -37,6 +37,8 @@ static inline float ease_apply(Ease e, float x) {
 }
 /* the whole app's motion, one knob: every tween, timer and glide runs this share of the time it asks for */
 #define ANIM_SPEED 0.83f
+/* one count per tween or timer that moved this frame (a store, no more): the background trailer waits for a still screen before it lets the TV's decoder go or starts the next */
+extern unsigned anim_moves;
 static inline void tween_set(Tween *t, float v) { t->from = t->to = t->v = v; t->on = 0; t->t = 0; }
 static inline void tween_to(Tween *t, float target, float dur, Ease e) {
   if (t->to == target && (t->on || t->v == target)) return;
@@ -45,7 +47,7 @@ static inline void tween_to(Tween *t, float target, float dur, Ease e) {
 }
 static inline int tween_tick(Tween *t, float dt) {
   if (!t->on) return 0;
-  t->t += dt; float x = t->t / t->dur;
+  anim_moves++; t->t += dt; float x = t->t / t->dur;
   if (x >= 1) { t->v = t->to; t->on = 0; return 1; }
   t->v = t->from + (t->to - t->from) * ease_apply(t->ease, x); return 1;
 }
@@ -54,7 +56,7 @@ static inline int tween_done(const Tween *t) { return !t->on; }
 /* a one-shot timer: 0..1 over dur seconds */
 typedef struct { float t, dur; int on; } Timer1;
 static inline void timer_start(Timer1 *t, float dur) { t->t = 0; t->dur = dur * ANIM_SPEED; t->on = 1; }
-static inline float timer_tick(Timer1 *t, float dt) { if (!t->on) return 1; t->t += dt; if (t->t >= t->dur) { t->on = 0; return 1; } return t->t / t->dur; }
+static inline float timer_tick(Timer1 *t, float dt) { if (!t->on) return 1; anim_moves++; t->t += dt; if (t->t >= t->dur) { t->on = 0; return 1; } return t->t / t->dur; }
 static inline float timer_x(const Timer1 *t) { return t->on ? (t->dur > 0 ? t->t / t->dur : 1) : 1; }
 
 /* a CSS cubic-bezier(x1,y1,x2,y2) at progress x (0..1): the web's exact curves where a named easing is too far off */
