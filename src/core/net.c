@@ -22,6 +22,7 @@ static void (*f_easy_cleanup)(CURL *);
 static struct curl_slist *(*f_slist_append)(struct curl_slist *, const char *);
 static void (*f_slist_free_all)(struct curl_slist *);
 static CURLcode (*f_global_init)(long);
+static void (*f_easy_reset)(CURL *); /* (optional: without it every request opens its own connection, as before) */
 static char caPath[1024];
 /* "StremioOrigin/1.0.0 (webOS; native)": the running version, the platform it runs on */
 static const char *ua(void) { static char u[96]; if (!u[0]) { const char *d = plat_device_name(); snprintf(u, sizeof u, "StremioOrigin/%s (%s; native)", update_current(), strstr(d, "webOS") ? "webOS" : strstr(d, "Android") ? "Android TV" : "Mac"); } return u; }
@@ -29,7 +30,7 @@ static const char *ua(void) { static char u[96]; if (!u[0]) { const char *d = pl
 static int resolve(void) {
 #ifdef SB_MAC
   f_easy_init = curl_easy_init; f_easy_setopt = curl_easy_setopt; f_easy_perform = curl_easy_perform; f_easy_getinfo = curl_easy_getinfo;
-  f_easy_cleanup = curl_easy_cleanup; f_slist_append = curl_slist_append; f_slist_free_all = curl_slist_free_all; f_global_init = curl_global_init;
+  f_easy_cleanup = curl_easy_cleanup; f_slist_append = curl_slist_append; f_slist_free_all = curl_slist_free_all; f_global_init = curl_global_init; f_easy_reset = curl_easy_reset;
   return 1;
 #else
   static const char *names[] = { "libcurl.so.5", "libcurl.so.4", "libcurl.so", NULL };
@@ -39,6 +40,7 @@ static int resolve(void) {
   L(f_easy_init, "curl_easy_init"); L(f_easy_setopt, "curl_easy_setopt"); L(f_easy_perform, "curl_easy_perform"); L(f_easy_getinfo, "curl_easy_getinfo");
   L(f_easy_cleanup, "curl_easy_cleanup"); L(f_slist_append, "curl_slist_append"); L(f_slist_free_all, "curl_slist_free_all"); L(f_global_init, "curl_global_init");
 #undef L
+  *(void **)(&f_easy_reset) = dlsym(h, "curl_easy_reset");
   return 1;
 #endif
 }
@@ -79,8 +81,21 @@ static size_t on_header(char *p, size_t s, size_t n, void *ud) {
   return len;
 }
 static size_t on_size_data(char *p, size_t s, size_t n, void *ud) { (void)p; (void)s; (void)n; (void)ud; return 0; } /* never the body: a 200 would be the whole film */
-static void perform(Req *r) {
-  CURL *c = f_easy_init(); if (!c) { r->status = 0; return; }
+/* A worker keeps its curl handle: the connections it opened (with their TLS sessions and DNS answers) stay, and the next
+   request to the same addon or API skips the handshake, the slowest part of a request on a TV. Every kept connection holds
+   memory, so it is bounded: a device under 1200 MB (a Firestick) keeps them on the quick lane only, one per worker. */
+static CURL *handles[WORKERS]; static int keepSlots, keepConns;
+static void keep_limits(void) { int mb = plat_mem_total_mb(), small = mb > 0 && mb < 1200; keepSlots = !f_easy_reset ? 0 : small ? SLOW0 : WORKERS; keepConns = small ? 1 : 2; fprintf(stderr, "[net] kept connections: %d workers, up to %d each\n", keepSlots, keepConns); }
+static int nReq, nConn, nShake; static double shakeSum;
+static void net_stats(CURL *c) { long nc = 0; double t = 0; f_easy_getinfo(c, CURLINFO_NUM_CONNECTS, &nc); f_easy_getinfo(c, CURLINFO_APPCONNECT_TIME, &t);
+  pthread_mutex_lock(&mu); nReq++; if (nc > 0) nConn++; if (nc > 0 && t > 0) { nShake++; shakeSum += t; }
+  if (nReq % 40 == 0) fprintf(stderr, "[net] %d requests, %d opened a connection, handshake average %.0f ms\n", nReq, nConn, nShake ? shakeSum * 1000 / nShake : 0.0);
+  pthread_mutex_unlock(&mu); }
+static void perform(Req *r, int slot) {
+  CURL *c; int kept = slot >= 0 && slot < keepSlots;
+  if (kept) { c = handles[slot]; if (c) f_easy_reset(c); else c = handles[slot] = f_easy_init(); } else c = f_easy_init();
+  if (!c) { r->status = 0; return; }
+  if (kept) { f_easy_setopt(c, CURLOPT_MAXCONNECTS, (long)keepConns); f_easy_setopt(c, CURLOPT_DNS_CACHE_TIMEOUT, 300L); }
   struct curl_slist *hs = NULL;
   f_easy_setopt(c, CURLOPT_URL, r->url); f_easy_setopt(c, CURLOPT_WRITEFUNCTION, on_data); f_easy_setopt(c, CURLOPT_WRITEDATA, r);
   f_easy_setopt(c, CURLOPT_FOLLOWLOCATION, 1L); f_easy_setopt(c, CURLOPT_MAXREDIRS, 8L); f_easy_setopt(c, CURLOPT_NOSIGNAL, 1L);
@@ -99,8 +114,8 @@ static void perform(Req *r) {
   r->status = rc == CURLE_OK ? (int)code : 0;
   if (r->size == 2) { char *e = NULL; f_easy_getinfo(c, CURLINFO_EFFECTIVE_URL, &e); free(r->body); r->body = (unsigned char *)strdup(e ? e : ""); r->len = strlen((char *)r->body); r->status = (int)code; }
   else if (r->size) { char t[32]; int k = snprintf(t, sizeof t, "%.0f", r->total > 0 ? r->total : 0); free(r->body); r->body = (unsigned char *)strdup(t); r->len = (size_t)k; r->status = (int)code; } /* the server's answer even without a size (a 404 says why a film will not play); 0 = no answer */
-  if (hs) f_slist_free_all(hs);
-  f_easy_cleanup(c);
+  net_stats(c); if (hs) f_slist_free_all(hs);
+  if (!kept) f_easy_cleanup(c);
 }
 static void parse_body(Req *r) {
   if (r->body && r->len > 1 && r->len < 16u * 1024 * 1024 && r->status >= 200 && r->status < 300) { const unsigned char *b = r->body; while (*b == ' ' || *b == '\n' || *b == '\r' || *b == '\t') b++; if (*b == '{' || *b == '[') r->json = cJSON_ParseWithLength((const char *)r->body, r->len); }
@@ -139,7 +154,7 @@ static void *worker(void *arg) { plat_thread_background(5);
     Req *r; if (slot >= BG0) { r = bgQ; bgQ = r->next; if (!bgQ) bgTail = NULL; } else if (slot >= SLOW0) { r = slowQ; slowQ = r->next; if (!slowQ) slowTail = NULL; } else { r = queue; queue = r->next; if (!queue) queueTail = NULL; }
     r->next = NULL; inflight[slot] = r;
     pthread_mutex_unlock(&mu);
-    if (!r->cancelled) { perform(r);
+    if (!r->cancelled) { perform(r, slot);
       /* a JSON answer is parsed here, off the drawing thread (catalogs, metadata, streams: tens of ms each on a TV) */
       parse_body(r); }
     pthread_mutex_lock(&mu);
@@ -182,6 +197,7 @@ int net_init(const char *ca) {
 #endif
   f_global_init(CURL_GLOBAL_ALL);
   if (ca) snprintf(caPath, sizeof caPath, "%s", ca);
+  keep_limits();
   for (int i = 0; i < WORKERS; i++) { pthread_t t; pthread_create(&t, NULL, worker, (void *)(size_t)i); pthread_detach(t); }
   { pthread_t t; pthread_create(&t, NULL, file_worker, NULL); pthread_detach(t); }
   return 1;

@@ -8,6 +8,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <pthread.h>
+#include <unistd.h>
 #include <time.h>
 #include <math.h>
 #define STB_IMAGE_IMPLEMENTATION
@@ -83,7 +84,7 @@ static unsigned frameNo; static long usedBytes, budgetBytes = 40L * 1024 * 1024;
 static unsigned frameNo; static long usedBytes, budgetBytes = 96L * 1024 * 1024;
 #endif
 static char cacheDir[1024];
-#define WORKERS 6   /* mostly waiting on the network; the decoding itself is limited to two at a time (dec_enter) */
+#define WORKERS_MAX 8   /* mostly waiting on the network; the decoding itself is limited (dec_enter). 6 under 1200 MB, each one in flight holds a picture */
 
 static unsigned fnv(const char *s) { unsigned h = 2166136261u; while (*s) { h ^= (unsigned char)*s++; h *= 16777619u; } return h; }
 static Img *find(const char *url, unsigned h) { for (Img *i = table[h % BUCKETS]; i; i = i->next) if (i->hash == h && !strcmp(i->url, url)) return i; return NULL; }
@@ -112,8 +113,8 @@ static int small_load(Img *im) {
   if (im->fit >= 0) { round_corners(px, w, h, im->radius); im->aspect = (float)im->w / im->h; } else im->aspect = (float)w / h;
   im->px = px; im->pw = w; im->ph = h; im->pch = 4; return 1;
 }
-static pthread_mutex_t decMu = PTHREAD_MUTEX_INITIALIZER; static pthread_cond_t decCv = PTHREAD_COND_INITIALIZER; static int decBusy;
-static void dec_enter(void) { pthread_mutex_lock(&decMu); while (decBusy >= 2) pthread_cond_wait(&decCv, &decMu); decBusy++; pthread_mutex_unlock(&decMu); }
+static pthread_mutex_t decMu = PTHREAD_MUTEX_INITIALIZER; static pthread_cond_t decCv = PTHREAD_COND_INITIALIZER; static int decBusy, decMax = 2; /* two; set once in img_init */
+static void dec_enter(void) { pthread_mutex_lock(&decMu); while (decBusy >= decMax) pthread_cond_wait(&decCv, &decMu); decBusy++; pthread_mutex_unlock(&decMu); }
 static void dec_leave(void) { pthread_mutex_lock(&decMu); decBusy--; pthread_cond_signal(&decCv); pthread_mutex_unlock(&decMu); }
 static void load_(Img *im);
 static void decode_part(Img *im, unsigned char *data, size_t len, int fromNet, const char *key);
@@ -175,7 +176,10 @@ static void *worker(void *a) { plat_thread_background(10); (void)a;
 }
 int img_init(const char *dir) {
   snprintf(cacheDir, sizeof cacheDir, "%s", dir);
-  for (int i = 0; i < WORKERS; i++) { pthread_t t; pthread_create(&t, NULL, worker, NULL); pthread_detach(t); }
+  /* 4 cores say little on their own (a 1 GB Firestick has them too): every core but the drawing's only with the memory of a better device */
+  int mb = plat_mem_total_mb(); long nc = sysconf(_SC_NPROCESSORS_ONLN); if (nc >= 4 && (mb <= 0 || mb >= 1500)) decMax = nc > 5 ? 4 : (int)nc - 1;
+  int n = mb > 0 && mb < 1200 ? 6 : WORKERS_MAX; fprintf(stderr, "[img] %d workers, %d decoding at once\n", n, decMax);
+  for (int i = 0; i < n; i++) { pthread_t t; pthread_create(&t, NULL, worker, NULL); pthread_detach(t); }
   return 1;
 }
 static float drawScale = 1.0f;

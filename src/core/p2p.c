@@ -214,11 +214,12 @@ static void choose_profile(Prof *P) {
 /* libtorrent for the device's memory: fewer connections and peers, small socket and send buffers, a short disk queue */
 static void apply_memory_settings(void) {
   static const struct { const char *n; int v[3]; } S[] = {
-    { "connections_limit",            {   50,    80,   120 } },
-    { "connection_speed",             {   15,    25,    35 } },
-    { "max_peerlist_size",            {  400,  1000,  2000 } },
+    /* column 0 is the weakest device (a 1 GB Firestick): leave it alone unless it is measured there */
+    { "connections_limit",            {   50,   100,   200 } },
+    { "connection_speed",             {   15,    25,    50 } },
+    { "max_peerlist_size",            {  400,  1500,  3000 } },
     { "max_paused_peerlist_size",     {   50,   200,   500 } },
-    { "num_want",                     {   50,   100,   200 } },
+    { "num_want",                     {   50,   150,   200 } },
     { "send_buffer_watermark",        { 196608, 393216, 524288 } },
     { "send_buffer_low_watermark",    { 32768, 65536, 10240 * 10 } },
     { "send_buffer_watermark_factor", {   50,    50,    50 } },
