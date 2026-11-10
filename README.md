@@ -8,7 +8,7 @@
 
 <p align="center">A native app for your Stremio and Nuvio accounts and their addons, written in C, for LG webOS TVs, Android TV, Google TV, Fire TV and phones.<br>Formerly Better Stremio.</p>
 
-<p align="center"><a href="https://github.com/betterstremio/webos/releases">webOS releases</a> · <a href="https://github.com/betterstremio/android/releases">Android releases</a> · <a href="https://betterstremio.github.io/">Website</a></p>
+<p align="center"><a href="https://github.com/betterstremio/origin/releases">Releases</a> · <a href="https://betterstremio.github.io/">Website</a></p>
 
 <p align="center"><a href="docs/brag.mp4"><img src="docs/brag.jpg" width="720" alt="Watch the launch video"></a><br><a href="docs/brag.mp4">▶ Watch the video from version 2.0.0, when the app was called Better Stremio (78 s)</a></p>
 
@@ -65,12 +65,12 @@ Settings > For You has the rest: recommendations on or off, Home layout, region,
 ### LG webOS
 For LG TVs running webOS 3 or later (ARM). See [Compatibility](docs/compatibility.md).
 
-Download the `.ipk` from [Releases](https://github.com/betterstremio/webos/releases) and install it on a TV in Developer Mode.
+Download the `.ipk` from [Releases](https://github.com/betterstremio/origin/releases) and install it on a TV in Developer Mode.
 
 ### Android TV, Google TV, Fire TV and phones
 Android 7.0 or later, on ARM (64-bit or 32-bit). One APK for TVs and phones.
 
-1. Download `tv.stremioorigin.app_<version>_android.apk` from [Releases](https://github.com/betterstremio/android/releases).
+1. Download `tv.stremioorigin.app_<version>_android.apk` from [Releases](https://github.com/betterstremio/origin/releases).
 2. Allow installs from the app you open it with. Android asks the first time.
    - On a TV, the Downloader app can fetch the APK from the release link and install it. On Fire TV, first turn on Settings > My Fire TV > Developer options > Install unknown apps for Downloader.
    - On a phone, open the downloaded file.
@@ -83,7 +83,7 @@ Settings > About shows a new version when there is one. The app downloads it and
 - **webOS:** tested on an LG C1 (webOS 6.5) and on webOS 4.4.
 - **Android:** the automated tests pass on the Google TV emulator (Android 14), and the 32-bit ARM build through Android's ARM translation. Not yet tested on a real TV box, Fire TV stick or phone, and For You and previews have not been tried with real addons on Android.
 
-Reports are welcome, with your device and system version: [webOS issues](https://github.com/betterstremio/webos/issues), [Android issues](https://github.com/betterstremio/android/issues).
+Reports are welcome, with your device and system version: [Issues](https://github.com/betterstremio/origin/issues).
 
 ## Privacy
 - Sign-in goes directly to Stremio or Nuvio. Your accounts stay on the device.

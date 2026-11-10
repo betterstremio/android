@@ -20,7 +20,7 @@
 #include <string.h>
 
 static struct { int open, started, state; double at, doneAt, outAt; char out[16], err[200], url[600]; } C; static SGlass glass;
-#define SB_ISSUES "https://github.com/betterstremio/webos/issues/new" /* where this build's issues go */
+#define SB_ISSUES "https://github.com/betterstremio/origin/issues/new" /* where this build's issues go */
 #define CW 1040.0f
 #define CH 470.0f
 static void close_card(void) { if (!C.open) return; C.open = 0; C.outAt = app_now(); }
