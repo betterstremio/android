@@ -183,7 +183,7 @@ static long proc_kb(const char *file, const char *key) {
 /* the device lines both the Share logs bundle and the network log start with */
 static void bundle_head(Buf *bp) {
   Buf b = *bp; char ts[32], l[512]; iso_now(ts);
-  snprintf(l, sizeof l, "Stremio Origin logs - %s\n", ts); b_add(&b, l);
+  snprintf(l, sizeof l, "Origin logs - %s\n", ts); b_add(&b, l);
   snprintf(l, sizeof l, "app %s %s (build %.12s)", SB_APP_ID, update_current(), buildId + 10); b_add(&b, l);
   char *os = read_file("/var/run/nyx/os_info.json", 8192), *di = read_file("/var/run/nyx/device_info.json", 8192);
   if (os) { char r[64], c[64], n[64], bid[64]; json_str(os, "webos_release", r, sizeof r); json_str(os, "core_os_release", c, sizeof c); json_str(os, "webos_name", n, sizeof n); json_str(os, "webos_build_id", bid, sizeof bid);

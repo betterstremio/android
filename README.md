@@ -1,16 +1,16 @@
-![Better Stremio](docs/header-rounded.png)
+![Origin](docs/header-rounded.png)
 
 <p align="center">
-  <img src="docs/logo-pill.png" width="200" alt="Better Stremio">
+  <img src="docs/logo-pill.png" width="200" alt="Origin">
 </p>
 
-<h1 align="center">Better Stremio</h1>
+<h1 align="center">Origin</h1>
 
-<p align="center">A native app for Stremio addons, written in C, for LG webOS TVs, Android TV, Google TV, Fire TV and phones.<br>It appears on your device as Stremio Origin.</p>
+<p align="center">A native app for your Stremio and Nuvio accounts and their addons, written in C, for LG webOS TVs, Android TV, Google TV, Fire TV and phones.<br>Formerly Better Stremio.</p>
 
 <p align="center"><a href="https://github.com/betterstremio/webos/releases">webOS releases</a> · <a href="https://github.com/betterstremio/android/releases">Android releases</a> · <a href="https://betterstremio.github.io/">Website</a></p>
 
-<p align="center"><a href="docs/brag.mp4"><img src="docs/brag.jpg" width="720" alt="Watch the Better Stremio video"></a><br><a href="docs/brag.mp4">▶ Watch the video (78 s)</a></p>
+<p align="center"><a href="docs/brag.mp4"><img src="docs/brag.jpg" width="720" alt="Watch the launch video"></a><br><a href="docs/brag.mp4">▶ Watch the video from version 2.0.0, when the app was called Better Stremio (78 s)</a></p>
 
 <p align="center"><em>Stremio™ and Nuvio are the names of their owners. This project is independent and unofficial, and is not affiliated with, endorsed by or sponsored by Stremio or Nuvio. The names only describe compatibility.</em></p>
 
@@ -18,9 +18,15 @@ You bring your own Stremio or Nuvio account and your own addons. The app ships e
 
 ## What it does
 
+**Stremio and Nuvio**
+- Sign in to either one with a QR code or your email, or keep both signed in and switch under Settings > Account. Each keeps its own library, addons and sign-in on the device
+- The top bar shows which one is in use
+- Logging out of one carries on with the other
+- Nuvio profiles: "Who's watching?", PIN locks, each profile with its own addons, library and For You rows. Add a profile from the picker, up to Nuvio's limit of 6
+
 **For You, on Home**
+- About 36 rows made from what you watch: Because you watched, Top picks, your languages and genres, More with an actor, New on a service, and rows by mood. Your addon rows follow them
 - A rotating billboard of top picks made from what you watch, with a preview playing inside it
-- Because you watched, built from the last thing you watched
 - Top 10 movies and series in your region
 - A cinematic layout where cards open wide as you rest on them, or a Classic layout if you prefer it
 
@@ -39,9 +45,8 @@ Settings > For You > Preview on focus also offers The title itself: the film, pa
 
 **Browsing**
 - Home, Discover, Library and Search from your addons, with artwork, logos, people and reviews
-- Collections, imported from your phone
+- Collections, imported from your phone, at the top of Discover
 - Library, watched state and Continue Watching synced with your Stremio or Nuvio account
-- Nuvio profiles: "Who's watching?" at start, PIN locks, each profile with its own addons, library and For You rows
 - Made for a remote: the arrows, OK and Back do everything
 - 11 languages, including Arabic (right to left)
 - Updates from inside the app
@@ -81,7 +86,7 @@ Settings > About shows a new version when there is one. The app downloads it and
 Reports are welcome, with your device and system version: [webOS issues](https://github.com/betterstremio/webos/issues), [Android issues](https://github.com/betterstremio/android/issues).
 
 ## Privacy
-- Sign-in goes directly to Stremio. Your account stays on the device.
+- Sign-in goes directly to Stremio or Nuvio. Your accounts stay on the device.
 - No analytics. Nothing is sent to the developer.
 - Recommendations are worked out on your device. It asks TMDB about titles in your library, using your key.
 - Resting on a card asks your addons for links to that title and the one next to it.

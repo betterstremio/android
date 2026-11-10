@@ -221,7 +221,7 @@ int main(int argc, char **argv) {
     if (light) { w = 1280; h = 720; flags &= ~SDL_WINDOW_ALLOW_HIGHDPI; } /* the preview shows the real 1280x720 drawing */
 #endif
     fprintf(stderr, "[start] %d MB of RAM, drawing size %s%s\n", memMb, light ? "720p light" : "full", ""); }
-  SDL_Window *win = SDL_CreateWindow("Stremio Origin", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, w, h, flags);
+  SDL_Window *win = SDL_CreateWindow("Origin", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, w, h, flags);
 #ifdef SB_MAC
   if (win && getenv("SB_SHOW")) { SDL_ShowWindow(win); SDL_RaiseWindow(win); } /* (started from a terminal it could stay behind, a Dock icon with no window in view) */
 #endif

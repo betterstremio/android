@@ -80,7 +80,7 @@ public final class SbUpdater {
 
     static void install(Activity a, File f) {
         if (Build.VERSION.SDK_INT >= 26 && !a.getPackageManager().canRequestPackageInstalls()) {
-            ready = f; waitingPermission = true; state = "1|Allow installs from Stremio Origin, then come back";
+            ready = f; waitingPermission = true; state = "1|Allow installs from Origin, then come back";
             try { a.startActivity(new Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, Uri.parse("package:" + a.getPackageName()))); }
             catch (Exception e) { fail("this device does not let apps install updates: install the APK by hand"); }
             return;
