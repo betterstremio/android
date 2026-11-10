@@ -134,6 +134,33 @@ void nv_logout(void) {
   syncGen++; store_scope_forget("nv-"); store_flush(); lost = 0; lib_invalidate(); recs_account_changed();
 }
 
+/* ---- two services on one device ---------------------------------------------------------------- */
+/* one is in use (acctKind); the other's own data waits in a file: Stremio's in acct/stremio.json, a Nuvio profile's in its usual one.
+   Nuvio's session keys have names of their own and simply stay. A Stremio user who never adds Nuvio never comes here */
+static const char *const ACCT_KEYS[] = { "authKey", "user", "addons", "lib", "streams", "recsDismissed", "nvLastSync" };
+#define NACCT ((int)(sizeof ACCT_KEYS / sizeof *ACCT_KEYS))
+static int stremio_file(void) { char p[1400]; struct stat st; snprintf(p, sizeof p, "%s/acct/stremio.json", store_data_dir()); return stat(p, &st) == 0; }
+static int nuvio_kept(void) { return nv_signed_in() && nv_profile_current() > 0; }
+int acct_other_kept(void) { return acct_is_nuvio() ? stremio_file() : nuvio_kept(); }
+static void acct_moved(void) { syncGen++; sb_account_moved(); store_flush(); lib_invalidate(); recs_account_changed(); }
+void acct_switch(void) {
+  if (!acct_other_kept()) return; char s[160]; nv_scope(nv_profile_current(), s, sizeof s);
+  if (acct_is_nuvio()) { store_scope_swap(s, "stremio", ACCT_KEYS, NACCT); store_remove("acctKind"); }
+  else { store_scope_swap("stremio", s, ACCT_KEYS, NACCT); store_set("acctKind", "nuvio"); }
+  acct_moved();
+}
+void acct_begin_add(void) { char s[160]; nv_scope(nv_profile_current(), s, sizeof s); /* (to a name no file has: nothing comes back) */
+  if (acct_is_nuvio()) { store_scope_swap(s, "none", ACCT_KEYS, NACCT); store_remove("acctKind"); } else store_scope_swap("stremio", "none", ACCT_KEYS, NACCT);
+  acct_moved();
+}
+int acct_restore_kept(void) {
+  if (acct_is_nuvio() || sb_auth_key()) return 0;
+  if (stremio_file()) store_scope_swap(NULL, "stremio", ACCT_KEYS, NACCT);
+  else if (nuvio_kept()) { char s[160]; nv_scope(nv_profile_current(), s, sizeof s); store_scope_swap(NULL, s, ACCT_KEYS, NACCT); store_set("acctKind", "nuvio"); }
+  else return 0;
+  acct_moved(); return 1;
+}
+
 /* sign-in with the code: an anonymous session first (the code is asked for under it), then Nuvio's device login */
 typedef struct { NvDoneCb cb; void *ud; char email[128]; } Box;
 static char qrNonce[48], qrDevice[160], qrUser[32], qrLink[400]; static double qrPoll = 3;

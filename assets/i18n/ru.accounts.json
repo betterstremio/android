@@ -19,5 +19,11 @@
 "Add profile": "Добавить профиль",
 "Adding…": "Добавление…",
 "Enter a name": "Введите имя",
-"Couldn’t add the profile": "Не удалось добавить профиль"
+"Couldn’t add the profile": "Не удалось добавить профиль",
+"Stremio or Nuvio, and your profiles": "Stremio или Nuvio и ваши профили",
+"Using {s}": "Используется {s}",
+"Switch to {s}": "Перейти на {s}",
+"Add a {s} account": "Добавить аккаунт {s}",
+"Both stay signed in": "Оба останутся в системе",
+"This account stays signed in": "Этот аккаунт останется в системе"
 }

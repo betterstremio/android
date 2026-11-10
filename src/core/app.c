@@ -313,6 +313,12 @@ void app_clock_draw(float right, float y, float alpha) {
 /* the profile in use: a disc in its colour with its first letter, left of the clock (a Nuvio account only) */
 static int profFoc; /* the disc, right of the tabs (Right from Library): its own focus, not a tab */
 static void prof_act(int i, int b) { (void)i; (void)b; profFoc = 0; profiles_open(PF_SWITCH); }
+/* which service is in use, in words, left of the profile disc (or of the clock) */
+static void acct_tag_draw(void) {
+  static int conf = -1; if (conf < 0) conf = nv_configured(); if (!conf || app_rtl()) return;
+  float W = text_width("00:00", 38, 600, -0.6f), x = SB_W - 48 - W - 26 - 18 - (acct_is_nuvio() ? 64 + 16 : 0);
+  text_draw(acct_is_nuvio() ? "Nuvio" : "Stremio", x, 50 - text_line_height(26) / 2, 26, 600, WHITE_A(190), 0, 0, ALIGN_RIGHT);
+}
 static void prof_draw(void) {
   if (!acct_is_nuvio() || !nv_profile_current() || app_rtl()) return;
   NvProfile p; int got = 0; for (int i = 0; i < nv_profile_count() && !got; i++) if (nv_profile_get(i, &p) && p.index == nv_profile_current()) got = 1; if (!got) return;
@@ -533,7 +539,7 @@ void topnav_draw(void) {
   }
   if (lift < 0) gfx_offset_pop();
   if (rv < 1) gfx_opacity_pop();
-  lglass_light(0); if (!welcome_is_open()) { float ck = 1 - pg; if (ck < 1) gfx_opacity_push(ck); if (lift < 0) gfx_offset_push(0, lift); if (SCR != SCR_LOGIN) prof_draw(); clock_draw(); if (lift < 0) gfx_offset_pop(); if (ck < 1) gfx_opacity_pop(); } /* the clock: never faded in with the page (it stays where it is through signing in, the start screen and the guide); away only with the bar for a trailer or the reviews */
+  lglass_light(0); if (!welcome_is_open()) { float ck = 1 - pg; if (ck < 1) gfx_opacity_push(ck); if (lift < 0) gfx_offset_push(0, lift); if (SCR != SCR_LOGIN) { acct_tag_draw(); prof_draw(); } clock_draw(); if (lift < 0) gfx_offset_pop(); if (ck < 1) gfx_opacity_pop(); } /* the clock: never faded in with the page (it stays where it is through signing in, the start screen and the guide); away only with the bar for a trailer or the reviews */
 }
 void app_clock_top(void) { if (splash_signed_in() || welcome_is_open()) { lglass_light(0); clock_draw(); } } /* over the start screen and the guide: the same clock, in its place
 

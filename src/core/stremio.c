@@ -50,6 +50,7 @@ static void replace_in(char *s, size_t cap, const char *from, const char *to) {
 /* ---- account ------------------------------------------------------------------------------ */
 int sb_init(void) { return 1; }
 const char *sb_auth_key(void) { return store_get("authKey", NULL); }
+static int acctGen;
 int acct_is_nuvio(void) { return !strcmp(store_get("acctKind", ""), "nuvio"); }
 int sb_signed_in(void) { if (acct_is_nuvio()) return nv_signed_in() && nv_profile_current() > 0; return sb_auth_key() != NULL; }
 const char *sb_user_email(void) { if (acct_is_nuvio()) return nv_email(); return js_str(store_node("user"), "email", ""); }
@@ -85,16 +86,16 @@ void sb_logout(void) {
   if (ak) { cJSON *o = cJSON_CreateObject(); cJSON_AddStringToObject(o, "authKey", ak); char *body = cJSON_PrintUnformatted(o); cJSON_Delete(o); net_post_json(STREMIO_API "/api/logout", body, NULL, NULL); free(body); }
   sb_forget_local();
 }
-void sb_forget_local(void) { store_remove("authKey"); store_remove("user"); store_remove("addons"); store_remove("lib"); store_remove("streams"); store_flush(); lib_invalidate(); }
+void sb_forget_local(void) { store_scope_forget("stremio."); store_remove("authKey"); store_remove("user"); store_remove("addons"); store_remove("lib"); store_remove("streams"); store_flush(); lib_invalidate(); }
 /* addons */
 cJSON *sb_addons(void) { cJSON *a = store_node("addons"); return cJSON_IsArray(a) ? a : NULL; }
 /* an addon can be switched off on this TV only (Settings > Addons): a local choice, never synced back to the
    account. Off, it gives no rows, metadata or streams here */
 void sb_addon_key(const cJSON *a, char *out, size_t cap) { const char *id = js_str(js_obj(a, "manifest"), "id", NULL); copy_str(out, cap, id && *id ? id : js_str(a, "transportUrl", "")); }
 int sb_addon_on(const cJSON *a) { char k[300], sk[320]; sb_addon_key(a, k, sizeof k); snprintf(sk, sizeof sk, "adOn_%s", k); return strcmp(store_get(sk, "true"), "false") != 0; }
-typedef struct { void (*cb)(int, void *); void *ud; } ChBox;
+typedef struct { void (*cb)(int, void *); void *ud; int gen; } ChBox;
 static void on_addons(int st, const unsigned char *b, size_t n, void *ud) {
-  ChBox *x = ud; cJSON *j = st == 200 ? net_json(b) : NULL; const cJSON *got = js_arr(js_obj(j, "result"), "addons");
+  ChBox *x = ud; if (x->gen != acctGen) { if (x->cb) x->cb(0, x->ud); free(x); return; } cJSON *j = st == 200 ? net_json(b) : NULL; const cJSON *got = js_arr(js_obj(j, "result"), "addons");
   int changed = 0;
   if (got && cJSON_GetArraySize(got)) {
     char *next = cJSON_PrintUnformatted(got); cJSON *cur = sb_addons(); char *curs = cur ? cJSON_PrintUnformatted(cur) : NULL;
@@ -107,7 +108,7 @@ void sb_sync_addons(void (*cb)(int, void *), void *ud) {
   if (acct_is_nuvio()) { nv_sync_addons(cb, ud); return; }
   const char *ak = sb_auth_key(); if (!ak) { if (cb) cb(0, ud); return; }
   cJSON *o = cJSON_CreateObject(); cJSON_AddStringToObject(o, "authKey", ak); cJSON_AddBoolToObject(o, "update", 1); char *body = cJSON_PrintUnformatted(o); cJSON_Delete(o);
-  ChBox *x = malloc(sizeof *x); x->cb = cb; x->ud = ud; net_post_json(STREMIO_API "/api/addonCollectionGet", body, on_addons, x); free(body);
+  ChBox *x = malloc(sizeof *x); x->cb = cb; x->ud = ud; x->gen = acctGen; net_post_json(STREMIO_API "/api/addonCollectionGet", body, on_addons, x); free(body);
 }
 /* ---- catalogs ------------------------------------------------------------------------------ */
 static const char *type_label(const char *t) { return !strcmp(t, "movie") ? T("Movies") : !strcmp(t, "series") ? T("Series") : t; }
@@ -598,10 +599,10 @@ static int lib_migrate_legacy(void) {
 unsigned sb_lib_sync_age(void) { if (acct_is_nuvio()) return nv_lib_sync_age(); return libSyncT ? SDL_GetTicks() - libSyncT : 0xffffffffu; }
 
 /* two-way sync with the account, newest _mtime wins */
-typedef struct { void (*cb)(int, void *); void *ud; int changed; char ids[500][64]; int nwant, at; } PullReq;
+typedef struct { void (*cb)(int, void *); void *ud; int changed, gen; char ids[500][64]; int nwant, at; } PullReq;
 static void pull_next(PullReq *r);
 static void on_pull_get(int st, const unsigned char *b, size_t n, void *ud) {
-  PullReq *r = ud; cJSON *j = st == 200 ? net_json(b) : NULL; const cJSON *items = js_arr(j, "result"), *it;
+  PullReq *r = ud; if (r->gen != acctGen) { if (r->cb) r->cb(0, r->ud); free(r); return; } cJSON *j = st == 200 ? net_json(b) : NULL; const cJSON *items = js_arr(j, "result"), *it;
   if (items) cJSON_ArrayForEach(it, items) { const char *id = js_str(it, "_id", NULL); if (id) { cJSON_DeleteItemFromObjectCaseSensitive(lib_arr(), id); cJSON_AddItemToObject(lib_arr(), id, cJSON_Duplicate(it, 1)); r->changed = 1; } }
   net_json_free(j); pull_next(r);
 }
@@ -613,7 +614,7 @@ static void pull_next(PullReq *r) {
   net_post_json(STREMIO_API "/api/datastoreGet", body, on_pull_get, r); free(body);
 }
 static void on_pull_meta(int st, const unsigned char *b, size_t n, void *ud) {
-  PullReq *r = ud; cJSON *j = st == 200 ? net_json(b) : NULL; const cJSON *rows = js_arr(j, "result");
+  PullReq *r = ud; if (r->gen != acctGen) { if (r->cb) r->cb(0, r->ud); free(r); return; } cJSON *j = st == 200 ? net_json(b) : NULL; const cJSON *rows = js_arr(j, "result");
   if (!rows) { net_json_free(j); libSyncing = 0; int ch = lib_migrate_legacy(); if (r->cb) r->cb(ch, r->ud); free(r); return; }
   cJSON *lib = lib_arr(); const cJSON *row; cJSON *remote = cJSON_CreateObject();
   /* what the account has newer than us */
@@ -639,8 +640,9 @@ void sb_pull_library(void (*cb)(int, void *), void *ud) {
   const char *ak = sb_auth_key(); if (!ak || libSyncing) { if (cb) cb(0, ud); return; }
   libSyncing = 1; libSyncT = SDL_GetTicks();
   cJSON *o = cJSON_CreateObject(); cJSON_AddStringToObject(o, "authKey", ak); cJSON_AddStringToObject(o, "collection", "libraryItem"); char *body = cJSON_PrintUnformatted(o); cJSON_Delete(o);
-  PullReq *r = calloc(1, sizeof *r); r->cb = cb; r->ud = ud; net_post_json(STREMIO_API "/api/datastoreMeta", body, on_pull_meta, r); free(body);
+  PullReq *r = calloc(1, sizeof *r); r->cb = cb; r->ud = ud; r->gen = acctGen; net_post_json(STREMIO_API "/api/datastoreMeta", body, on_pull_meta, r); free(body);
 }
+void sb_account_moved(void) { acctGen++; libSyncing = 0; }
 
 /* ---- streams ------------------------------------------------------------------------------- */
 /* the subtitles stream objects carried (stream.subtitles), by the stream's address: the player asks for them */

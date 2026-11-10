@@ -19,5 +19,11 @@
 "Add profile": "Profiel toevoegen",
 "Adding…": "Toevoegen…",
 "Enter a name": "Voer een naam in",
-"Couldn’t add the profile": "Profiel kon niet worden toegevoegd"
+"Couldn’t add the profile": "Profiel kon niet worden toegevoegd",
+"Stremio or Nuvio, and your profiles": "Stremio of Nuvio, en je profielen",
+"Using {s}": "{s} in gebruik",
+"Switch to {s}": "Overschakelen naar {s}",
+"Add a {s} account": "Een {s}-account toevoegen",
+"Both stay signed in": "Beide blijven ingelogd",
+"This account stays signed in": "Dit account blijft ingelogd"
 }

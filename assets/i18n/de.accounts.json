@@ -19,5 +19,11 @@
 "Add profile": "Profil hinzufügen",
 "Adding…": "Wird hinzugefügt…",
 "Enter a name": "Namen eingeben",
-"Couldn’t add the profile": "Profil konnte nicht hinzugefügt werden"
+"Couldn’t add the profile": "Profil konnte nicht hinzugefügt werden",
+"Stremio or Nuvio, and your profiles": "Stremio oder Nuvio und deine Profile",
+"Using {s}": "{s} wird verwendet",
+"Switch to {s}": "Zu {s} wechseln",
+"Add a {s} account": "{s}-Konto hinzufügen",
+"Both stay signed in": "Beide bleiben angemeldet",
+"This account stays signed in": "Dieses Konto bleibt angemeldet"
 }

@@ -5,6 +5,7 @@
 extern Screen homeScreen, discScreen, libScreen, colScreen;
 int  board_home_ready(void);
 void tabs_warm_tick(void);    /* after start: the other tabs' first screens made ready in the background */    /* the first rows' posters are in, the hero is set, the backdrop is up */
+void board_invalidate_all(void); /* another account: Discover too */
 void board_invalidate(void);    /* the library changed: Home and Library rebuild when shown */
 void board_rebuild(void);       /* the board on screen reloads its rows in place, focus kept */
 int  board_spot_up(void);

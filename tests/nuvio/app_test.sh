@@ -87,4 +87,32 @@ check "add: the picker holds the new profile" "len(s.get('nvProfiles') or [])==4
 fresh; ctl "list=0"; run adde "100:up,130:right,620:right,650:ok,$TYPE" 1500
 check "add on an account with no saved profile: its first profile goes too" "(lambda P: len(P)==1 and [x['profile_index'] for x in P[0]['p_profiles']]==[1,2])($PUSHED)"
 ctl "list=3"
+# 10. two services on one TV: each keeps its own data, and a half-finished add comes back
+seed2() { rm -rf "$D"; mkdir -p "$D/acct"; python3 -I - "$D" <<'PY'
+import json,sys
+d=sys.argv[1]; item=lambda i:{"_id":i,"name":i,"type":"movie","removed":False,"state":{}}
+json.dump({"guideSeen":"1","whatsNewSeen":"9.9.9","authKey":"fakeauth","user":{"_id":"u1","email":"s@example.test"},"addons":[],"lib":{"ttS":item("ttS")},"nvAccess":"user-token","nvRefresh":"r1","nvExp":"9999999999","nvUser":{"email":"n@example.test"},"nvProfiles":[{"i":1,"name":"Sam","color":1,"pin":False,"pa":False}],"nvProfile":"1","nvOwner":"owner-123"},open(d+'/state.json','w'))
+json.dump({"lib":{"ttN":item("ttN")},"addons":[]},open(d+'/acct/nv-owner-123-p1.json','w'))
+PY
+}
+SF="json.load(open(d+'/acct/stremio.json'))"; NF="json.load(open(d+'/acct/nv-owner-123-p1.json'))"
+seed2; SB_ACCT_ACTION=switch run sw1 "" 300
+check "to Nuvio: Stremio's key and library are set aside" "s.get('acctKind')=='nuvio' and not s.get('authKey') and 'ttS' not in lib and $SF['authKey']=='fakeauth' and 'ttS' in $SF['lib']"
+check "to Nuvio: its data came back and it synced" "'pull_lib' in k"
+SB_ACCT_ACTION=switch run sw2 "" 300
+check "back to Stremio: its key and library, none of Nuvio's" "not s.get('acctKind') and s.get('authKey')=='fakeauth' and s['user']['_id']=='u1' and 'ttS' in lib and 'tt0111161' not in lib"
+check "back to Stremio: Nuvio stays signed in, its data set aside" "s.get('nvRefresh')=='r1' and s.get('nvProfile')=='1' and 'tt0111161' in $NF['lib']"
+check "back to Stremio: Nuvio's server is left alone" "not any(x.startswith('pull') for x in k)"
+SB_ACCT_ACTION=switch run sw3 "" 300; SB_ACCT_ACTION=logout run sw4 "" 300
+check "log out of Nuvio: Stremio carries on" "not s.get('acctKind') and s.get('authKey')=='fakeauth' and 'ttS' in lib and not s.get('nvRefresh')"
+SB_ACCT_ACTION=logout run sw5 "" 300
+check "log out of Stremio too: nothing left" "not s.get('authKey') and not lib and not any(f.startswith('stremio') for f in acct)"
+seed2; python3 -I -c "import json,sys; p=sys.argv[1]+'/state.json'; s=json.load(open(p)); s['acctKind']='nuvio'; a=s.pop('authKey'); u=s.pop('user'); l=s.pop('lib'); json.dump(s,open(p,'w')); json.dump({'authKey':a,'user':u,'lib':l,'addons':[]},open(sys.argv[1]+'/acct/stremio.json','w'))" "$D"
+SB_ACCT_ACTION=logout run sw6 "" 300; SB_ACCT_ACTION=logout run sw7 "" 300
+check "a kept Stremio account logged out from the other side goes" "not s.get('authKey') and not any(f.startswith('stremio') for f in acct)"
+seed2; python3 -I -c "import json,sys; p=sys.argv[1]+'/state.json'; s=json.load(open(p)); s['nvRefresh']=None; del s['nvRefresh']; del s['nvProfile']; json.dump(s,open(p,'w'))" "$D"
+SB_ACCT_ACTION=add run add1 "" 200
+check "add: the Stremio account is set aside" "not s.get('authKey') and 'ttS' in $SF['lib']"
+run add2 "" 200
+check "add left half way: back on Stremio at the next start" "s.get('authKey')=='fakeauth' and 'ttS' in lib and not s.get('acctKind')"
 echo "fails: $FAILS"; [ $FAILS = 0 ] && echo "APP TEST PASSED"

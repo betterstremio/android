@@ -19,5 +19,11 @@
 "Add profile": "Profil ekle",
 "Adding…": "Ekleniyor…",
 "Enter a name": "Bir ad girin",
-"Couldn’t add the profile": "Profil eklenemedi"
+"Couldn’t add the profile": "Profil eklenemedi",
+"Stremio or Nuvio, and your profiles": "Stremio veya Nuvio ve profilleriniz",
+"Using {s}": "Kullanılan: {s}",
+"Switch to {s}": "{s} hesabına geç",
+"Add a {s} account": "{s} hesabı ekle",
+"Both stay signed in": "İkisi de oturumda kalır",
+"This account stays signed in": "Bu hesap oturumda kalır"
 }

@@ -20,11 +20,13 @@
 #include "core/hit.h"
 #include "core/nuvio.h"
 #include "screens/profiles.h"
+#include "core/sync.h"
+#include "screens/board.h"
 #include <stdlib.h>
 
 static struct {
   int zone;                 /* 0 email, 1 password, 2 button, 3 the service (Stremio | Nuvio) */
-  int svc, polling, loadingProfiles; /* svc: 0 Stremio, 1 Nuvio */
+  int svc, polling, loadingProfiles, adding; /* svc: 0 Stremio, 1 Nuvio; adding: the other account waits, Back returns to it */
   int editing;              /* OK on a field: typing goes in */
   char email[128], pass[128], err[256];
   char code[32], link[400], stat[128]; int qrOk, started; double pollAt; unsigned pollReq;
@@ -57,7 +59,7 @@ static void on_nv_qr(int ok, const char *err, void *ud) { (void)ud; if (!L.svc) 
 }
 static void start_qr(void) { if (L.started) return; L.started = 1; L.stat[0] = 0; L.qrOk = 0; if (L.svc) nv_qr_start(on_nv_qr, NULL); else net_get("https://link.stremio.com/api/create", on_create, NULL); }
 static void set_service(int v) { /* only the chosen service is asked: a Stremio user never reaches Nuvio's server */
-  if (v == L.svc || (v && !nv_configured()) || L.done || L.loadingProfiles) return; L.svc = v; if (L.pollReq) net_cancel(L.pollReq); L.pollReq = 0; L.polling = 0;
+  if (v == L.svc || (v && !nv_configured()) || L.done || L.loadingProfiles || L.adding) return; L.svc = v; if (L.pollReq) net_cancel(L.pollReq); L.pollReq = 0; L.polling = 0;
   L.qrOk = 0; L.code[0] = L.link[0] = L.stat[0] = L.err[0] = 0; L.started = 0; start_qr();
 }
 static void step(void) { if (--L.left <= 0 && !L.restarting) { L.restarting = 1; timer_start(&L.restart, 0.5f); } }
@@ -101,6 +103,7 @@ static void do_email(void) {
 }
 static void enter(const void *p) {
   if (p && !strncmp((const char *)p, "load:", 5)) { memset(&L.nudge, 0, sizeof L.nudge); L.done = 0; L.restarting = 0; login_profile_go(atoi((const char *)p + 5)); return; } /* a profile new on this device */
+  if (p && !strncmp((const char *)p, "add:", 4)) { L.adding = 1; L.svc = atoi((const char *)p + 4); L.done = 0; L.restarting = 0; L.started = 0; L.qrOk = 0; L.code[0] = L.link[0] = L.stat[0] = L.err[0] = L.email[0] = L.pass[0] = 0; }
   if (acct_is_nuvio() && nv_signed_in()) { L.svc = 1; reveal(); nv_signed(); return; } /* signed in, no profile chosen yet */
   L.zone = 0; L.editing = 0; L.t0 = app_now(); if (!L.revealed) L.revealAt = app_now() + 1.6; /* the halves wait for the QR code (1.6 s at most), then rise in together */
   start_qr();
@@ -116,6 +119,7 @@ static int key(int k) {
     if (k == K_UP) { L.editing = 0; SDL_StopTextInput(); return 1; }
     return 1;
   }
+  if (k == K_BACK && L.adding && !L.loadingProfiles) { L.adding = 0; L.qrOk = 0; if (acct_restore_kept()) { board_invalidate_all(); topNav.idx = NAV_HOME; app_go(SCR_HOME, NULL, 1); sync_after_switch(); profiles_at_start(); } return 1; }
   if (k == K_BACK) { app_quit(); return 1; } /* nowhere to go back to: Back closes the app */
   if (L.zone == 3) { if (k == K_LEFT) set_service(0); else if (k == K_RIGHT) set_service(1); else if (k == K_OK) set_service(!L.svc); else if (k == K_DOWN) L.zone = 0; else nudge_start(&L.nudge, k); return 1; }
   if (k == K_UP && L.zone == 0 && nv_configured()) { L.zone = 3; return 1; }

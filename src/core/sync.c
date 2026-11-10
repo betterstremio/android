@@ -40,7 +40,7 @@ void sync_tick(void) {
   double now = app_now();
   if (acct_is_nuvio()) { nv_tick(); /* (a Stremio account never comes here) */
     static int gone; if (nv_session_lost() && !gone && SCR != SCR_LOGIN && !player_open()) { gone = 1; /* the server ended the session: sign in again, said, not a silent empty app */
-      nv_logout(); board_invalidate(); toast(T("Your Nuvio session ended. Sign in again"), 4000, NULL); app_go(SCR_LOGIN, NULL, 1); }
+      nv_logout(); board_invalidate_all(); toast(T("Your Nuvio session ended. Sign in again"), 4000, NULL); if (acct_restore_kept()) { app_go(SCR_HOME, NULL, 1); sync_after_switch(); } else app_go(SCR_LOGIN, NULL, 1); }
     if (!nv_session_lost()) gone = 0; }
   if (!libBoot && now - bootAt >= 0.7) { libBoot = 1; sb_pull_library(on_lib, NULL); }
   if (!addonBoot && now - bootAt >= 0.9) { addonBoot = 1; sb_sync_addons(on_addons, NULL); }

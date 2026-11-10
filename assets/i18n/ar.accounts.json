@@ -19,5 +19,11 @@
 "Add profile": "إضافة ملف شخصي",
 "Adding…": "جارٍ الإضافة…",
 "Enter a name": "أدخل اسمًا",
-"Couldn’t add the profile": "تعذّر إضافة الملف الشخصي"
+"Couldn’t add the profile": "تعذّر إضافة الملف الشخصي",
+"Stremio or Nuvio, and your profiles": "Stremio أو Nuvio وملفاتك الشخصية",
+"Using {s}": "قيد الاستخدام: {s}",
+"Switch to {s}": "التبديل إلى {s}",
+"Add a {s} account": "إضافة حساب {s}",
+"Both stay signed in": "يبقى كلاهما مسجَّل الدخول",
+"This account stays signed in": "يبقى هذا الحساب مسجَّل الدخول"
 }

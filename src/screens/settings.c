@@ -43,6 +43,7 @@ static Tween supK; static int supWant; /* the support row: which code shows (0 t
 #include "core/recs.h"
 #include "core/nuvio.h"
 #include "screens/profiles.h"
+#include "core/sync.h"
 
 typedef struct { const char *v, *lb; } Opt;
 typedef struct { char k[160]; char lb[96], ds[200]; const Opt *opts; int nopts; const char *d; int action, info, raw, off, sub; Opt dyn[40]; char dynS[40][64]; } Setting; /* off: greyed, not selectable */
@@ -63,7 +64,7 @@ static const Opt ACCENT_OPTS[] = { { "logo", "From the logo" }, { "adaptive", "F
 #define NCAT 11
 #define MAXROWS 48
 static Setting recsS[10];
-static Setting playBase[8], playS[8], subsS[6], audS[5], lookS[2], langS[2], keyS[5], addonS[40], acctS[1], supS[7], profS[2];
+static Setting playBase[8], playS[8], subsS[6], audS[5], lookS[2], langS[2], keyS[5], addonS[40], acctS[1], supS[7], profS[4];
 static Cat cats[NCAT]; static int ncat; /* (Keys leaves when this build carries every key) */
 
 /* the layout, in the web's pixels: the grid is centred, 1600 wide, 150 from the top */
@@ -227,7 +228,10 @@ static void build(void) {
     s->opts = s->dyn; s->nopts = n; }
   int nl = lang_opts(), nk = keys_opts(), na = addon_opts(), nr = recs_opts();
   set_act(&acctS[0], "__logout", "Log out", S.acct); acctS[0].raw = 1;
-  set_act(&profS[0], "__profiles", "Switch profile", "See who\xe2\x80\x99s watching"); set_s(&profS[1], "askProfile", "Ask who\xe2\x80\x99s watching at start", "Off: straight into the last profile", OO, 2, "true");
+  int nprof = 0; { const char *svc = acct_is_nuvio() ? "Nuvio" : "Stremio", *other = acct_is_nuvio() ? "Stremio" : "Nuvio"; /* which account is in use, and the way to the other */
+    set_act(&profS[nprof], "__acctinfo", T1("Using {s}", "s", svc), S.acct); profS[nprof++].raw = 1;
+    if (nv_configured()) { int kept = acct_other_kept(); set_act(&profS[nprof], kept ? "__acctswitch" : "__acctadd", T1(kept ? "Switch to {s}" : "Add a {s} account", "s", other), T(kept ? "Both stay signed in" : "This account stays signed in")); profS[nprof++].raw = 1; } }
+  if (acct_is_nuvio()) { set_act(&profS[nprof++], "__profiles", "Switch profile", "See who\xe2\x80\x99s watching"); set_s(&profS[nprof++], "askProfile", "Ask who\xe2\x80\x99s watching at start", "Off: straight into the last profile", OO, 2, "true"); }
   int nab = about_opts();
   /* grouped by task: what you watch, what the screens look like, account and system; Log out on its own, last */
   Cat c[NCAT] = {
@@ -237,12 +241,12 @@ static void build(void) {
     { "Watch", "For You", "g_spark", "Recommendations on Home, region, languages", NULL, recsS, nr, 0 },
     { "Screens", "Appearance", "set_look", "Accent colour", "look", lookS, 2, 0 },
     { "Screens", "Language", "set_lang", "The language of the app", NULL, langS, nl, 0 },
-    { "Account and system", "Profile", "set_acct", "Your Nuvio profiles", NULL, profS, 2, 0 },
+    { "Account and system", "Account", "set_acct", "Stremio or Nuvio, and your profiles", NULL, profS, nprof, 0 },
     { "Account and system", "Addons", "set_addon", "", NULL, addonS, na, 0 },
     { "Account and system", "Keys", "set_keys", "Titles in your language, ratings and reviews", "keys", keyS, nk, 0 },
     { "Account and system", "About", "info", "Version, updates, logs and support", "about", supS, nab, 0 },
     { "", "Log out", "set_out", "", NULL, acctS, 1, 1 } };
-  ncat = 0; for (int i = 0; i < NCAT; i++) if ((c[i].opts != keyS || nk) && (c[i].opts != profS || acct_is_nuvio())) cats[ncat++] = c[i];
+  ncat = 0; for (int i = 0; i < NCAT; i++) if (c[i].opts != keyS || nk) cats[ncat++] = c[i];
   play_layout(); S.dirty = 1;
   best_caps_probe(caps_known, NULL); /* (the Dolby Vision row, once the TV has said) */
 }
@@ -268,7 +272,10 @@ static void enter(const void *p) { (void)p;
   memset(&S.hc, 0, sizeof S.hc); memset(&S.ho, 0, sizeof S.ho); memset(&S.hp, 0, sizeof S.hp);
   S.enterAt = app_now(); S.keysAt = -10; S.keysZone = 0;
 }
-static void logout(void) { toast(T("Signing out…"), 1500, NULL); sb_logout(); board_invalidate(); app_go(SCR_LOGIN, NULL, 1); }
+static void acct_landed(void) { board_invalidate_all(); topNav.idx = NAV_HOME; app_go(SCR_HOME, NULL, 1); sync_after_switch(); profiles_at_start(); } /* another account is in use: its Home, its "Who's watching?" */
+static void acct_swap(void) { acct_switch(); acct_landed(); }
+static void acct_add(void) { static char arg[8]; snprintf(arg, sizeof arg, "add:%d", acct_is_nuvio() ? 0 : 1); acct_begin_add(); board_invalidate_all(); app_go(SCR_LOGIN, arg, 1); }
+static void logout(void) { toast(T("Signing out…"), 1500, NULL); sb_logout(); board_invalidate(); if (acct_restore_kept()) acct_landed(); else app_go(SCR_LOGIN, NULL, 1); } /* (the other account, if one is kept, carries on) */
 static void on_sync_addons(int changed, void *ud) { (void)ud; toast(T(changed ? "Addons updated" : "Addons up to date"), 2000, NULL); if (changed) board_invalidate(); cats[5].n = addon_opts(); if (S.cat == 5 && S.idx >= cats[5].n) S.idx = cats[5].n - 1; S.dirty = 1; }
 static void on_sync_lib(int changed, void *ud) { (void)ud; if (changed) board_invalidate(); }
 static void sync_now(void) { if (acct_is_nuvio()) nv_addons_force_next(); toast(T("Syncing…"), 1500, NULL); sb_pull_library(on_sync_lib, NULL); sb_sync_addons(on_sync_addons, NULL); }
@@ -443,7 +450,7 @@ static int key(int k) {
       if (!strcmp(op->k, "__trakt")) { qrcard_show_trakt(on_trakt_card, NULL); return 1; }
       if (!strcmp(op->k, "__traktOff")) { trakt_key_clear(); relang(); toast(T("The Trakt id is gone"), 2000, NULL); return 1; }
       if (!strcmp(op->k, "__keys")) { settings_open_keys(); return 1; }
-      if (!strcmp(op->k, "__sync")) sync_now(); else if (!strcmp(op->k, "__profiles")) profiles_open(PF_SWITCH); else if (!strcmp(op->k, "__logs")) logcard_show(); else if (!strcmp(op->k, "__guide")) welcome_show_guide();
+      if (!strcmp(op->k, "__acctswitch")) acct_swap(); else if (!strcmp(op->k, "__acctadd")) acct_add(); else if (!strcmp(op->k, "__sync")) sync_now(); else if (!strcmp(op->k, "__profiles")) profiles_open(PF_SWITCH); else if (!strcmp(op->k, "__logs")) logcard_show(); else if (!strcmp(op->k, "__guide")) welcome_show_guide();
       else if (!strcmp(op->k, "__support")) { if (welcome_github_url()[0]) { supWant = !supWant; tween_to(&supK, (float)supWant, 0.5f, EASE_IN_OUT); orbs_pulse(supWant ? ORB_RIGHT : ORB_LEFT, 0.6f); } } /* the other code, turned over */ else if (!strcmp(op->k, "__upd")) update_install(); else if (!strcmp(op->k, "__check")) update_check(1); else if (!strcmp(op->k, "__logout")) logout(); return 1; } /* (only Log out signs out: a row with no action of its own does nothing) */
     if (is_switch(op)) { set_val(op, !strcmp(cur_val(op), "true") ? "false" : "true", 0); return 1; } /* a switch: OK flips it */
     open_pick(); return 1; }

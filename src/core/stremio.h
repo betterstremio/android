@@ -22,6 +22,11 @@ typedef struct { char title[96], type[16], url[512], key[48], path[512], extra[2
 
 int  sb_init(void);
 /* ---- account ---- */
+int  acct_other_kept(void);            /* the other service is signed in on this device too */
+void acct_switch(void);                /* over to the other service: the data swapped on this device, nothing downloaded first */
+void acct_begin_add(void);             /* the account in use set aside, to sign in to the other service */
+int  acct_restore_kept(void);          /* no account in use and one kept: back to it (1). Also at start: an add that was left half way */
+void sb_account_moved(void);           /* another account is in use: anything still out for the old one is dropped */
 int  acct_is_nuvio(void);             /* the account in use is a Nuvio one (core/nuvio.c); otherwise everything below is Stremio's */
 int  sb_signed_in(void);
 const char *sb_auth_key(void);

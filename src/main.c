@@ -262,6 +262,8 @@ int main(int argc, char **argv) {
   app_init(); player_init();
   app_register(SCR_LOGIN, &loginScreen); app_register(SCR_HOME, &homeScreen); app_register(SCR_DISC, &discScreen); app_register(SCR_LIB, &libScreen);
   app_register(SCR_DETAIL, &detailScreen); app_register(SCR_SIM, &simScreen); app_register(SCR_CAT, &catScreen); app_register(SCR_COL, &colScreen); app_register(SCR_SEARCH, &searchScreen); app_register(SCR_SET, &setScreen); app_card_menu_hook = cwmenu_show;
+  acct_restore_kept();
+  { const char *a = getenv("SB_ACCT_ACTION"); if (a) { if (!strcmp(a, "switch")) acct_switch(); else if (!strcmp(a, "add")) acct_begin_add(); else if (!strcmp(a, "logout")) { sb_logout(); acct_restore_kept(); } } } /* development: tests/nuvio */
   if (sb_signed_in() || getenv("SB_SKIP_LOGIN")) { app_go(SCR_HOME, NULL, 1); splash_start(1, 0); } /* SB_SKIP_LOGIN: the default rows without an account (development) */
   else { app_splash_done = 1; app_go(SCR_LOGIN, NULL, 1); }
   profiles_at_start(); /* a Nuvio account: "Who's watching?", with Home built behind it for the last profile */
