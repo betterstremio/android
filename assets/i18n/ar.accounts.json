@@ -15,5 +15,9 @@
 "Couldn’t get a sign-in code": "تعذّر الحصول على رمز تسجيل الدخول",
 "Couldn’t reach Nuvio": "تعذّر الوصول إلى Nuvio",
 "Wrong email or password": "البريد أو كلمة المرور غير صحيحة",
-"signed out": "تم تسجيل الخروج"
+"signed out": "تم تسجيل الخروج",
+"Add profile": "إضافة ملف شخصي",
+"Adding…": "جارٍ الإضافة…",
+"Enter a name": "أدخل اسمًا",
+"Couldn’t add the profile": "تعذّر إضافة الملف الشخصي"
 }

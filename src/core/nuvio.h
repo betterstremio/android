@@ -31,6 +31,7 @@ int  nv_profile_get(int i, NvProfile *out);
 int  nv_profile_current(void);           /* 0 when none chosen yet */
 const char *nv_profile_name(void);
 void nv_profile_verify_pin(int index, const char *pin, NvDoneCb cb, void *ud);
+void nv_profile_add(const char *name, NvDoneCb cb, void *ud); /* one more profile on the account, using the primary's addons; cb after the list is pulled again */
 void nv_profile_select(int index);       /* another profile: its data swapped in from this device's kept copy, no download */
 int  nv_profile_kept(int index);         /* this device already holds that profile's copy */
 void nv_scope(int index, char *out, size_t cap);

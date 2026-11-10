@@ -64,10 +64,27 @@ PIN="340:right,370:ok,420:ok,450:down,480:down,510:down,540:right,570:right,600:
 run pin "${PIN// /}" 1700
 check "a wrong PIN then the right one" "s.get('nvProfile')=='3' and [r['b'] for r in log if r['k']=='pin']==['1','1234']"
 check "uses the primary's addons" "any(r['k']=='addons' and r['b']==1 for r in log)"
+# the question switched off: a locked last profile still asks; an open one goes straight in
+python3 -I -c "import json,sys; p=sys.argv[1]+'/state.json'; s=json.load(open(p)); s['askProfile']='false'; json.dump(s,open(p,'w'))" "$D"
+run asklocked "" 300; if grep -q '\[profiles\] open, mode 0' "$O/asklocked.log"; then echo "ok   a locked profile asks even with the question off"; else echo "FAIL locked profile opened without asking"; FAILS=$((FAILS + 1)); fi
+python3 -I -c "import json,sys; p=sys.argv[1]+'/state.json'; s=json.load(open(p)); s['askProfile']='true'; json.dump(s,open(p,'w'))" "$D"
 # 7. the session: 401 once, refreshed; 500 once, the second address
-ctl "expire=1"; run refresh "340:ok" 500; check "401: refreshed and carried on" "'refresh' in k and 'pull_lib' in k"
+ctl "expire=1"; run refresh "340:left,370:left,400:ok" 500; check "401: refreshed and carried on" "'refresh' in k and 'pull_lib' in k"
 ctl "fail=1"; run fallback "340:ok" 500; check "500: the second address answers" "'pull_wat' in k"
 # 8. the server ends the session: back to sign-in, signed out, nothing left behind
 ctl "expire=1"; ctl "refuse=1"; run lost "340:ok" 500; ctl "refuse=0"
 check "session refused: signed out and forgotten" "not s.get('acctKind') and not s.get('nvRefresh') and not [f for f in acct if f.startswith('nv-')] and not lib"
+# 9. the first sign-in with one profile still asks; Add profile: one push, the whole list, every field kept
+fresh() { rm -rf "$D"; mkdir -p "$D"; seed; }
+PUSHED="[r['b'] for r in log if r['k']=='sync_push_profiles']"
+TYPE="750:ok,780:right,810:ok,840:down,870:down,900:down,930:down,960:right,990:right,1020:right,1050:ok"
+fresh; ctl "list=1"; run oneprof "100:up,130:right" 800; if grep -q '\[profiles\] open, mode 1' "$O/oneprof.log"; then echo "ok   one profile: the picker still shows on the first sign-in"; else echo "FAIL one profile went straight in"; FAILS=$((FAILS + 1)); fi
+fresh; ctl "list=3"; run addp "100:up,130:right,620:right,650:right,680:right,710:ok,$TYPE" 1500
+check "add: pushed once, the whole list plus the new one" "(lambda P: len(P)==1 and [x['profile_index'] for x in P[0]['p_profiles']]==[1,2,3,4] and P[0]['p_client_max_profiles']==6)($PUSHED)"
+check "add: the rows that were there keep every field" "(lambda p: p['avatar_id']=='av1' and p['profile_background_id']=='bg1' and p['profile_background_url']=='https://example.test/b.png' and p['uses_primary_plugins'] is True and p['name']=='Sam')($PUSHED[0]['p_profiles'][0])"
+check "add: the new profile shares the primary's addons" "(lambda p: p['name']=='Ab' and p['uses_primary_addons'] is True and p['uses_primary_plugins'] is False)($PUSHED[0]['p_profiles'][3])"
+check "add: the picker holds the new profile" "len(s.get('nvProfiles') or [])==4"
+fresh; ctl "list=0"; run adde "100:up,130:right,620:right,650:ok,$TYPE" 1500
+check "add on an account with no saved profile: its first profile goes too" "(lambda P: len(P)==1 and [x['profile_index'] for x in P[0]['p_profiles']]==[1,2])($PUSHED)"
+ctl "list=3"
 echo "fails: $FAILS"; [ $FAILS = 0 ] && echo "APP TEST PASSED"

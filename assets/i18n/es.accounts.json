@@ -15,5 +15,9 @@
 "Couldn’t get a sign-in code": "No se pudo obtener un código de inicio de sesión",
 "Couldn’t reach Nuvio": "No se pudo conectar con Nuvio",
 "Wrong email or password": "Correo o contraseña incorrectos",
-"signed out": "sesión cerrada"
+"signed out": "sesión cerrada",
+"Add profile": "Añadir perfil",
+"Adding…": "Añadiendo…",
+"Enter a name": "Introduce un nombre",
+"Couldn’t add the profile": "No se pudo añadir el perfil"
 }

@@ -77,7 +77,6 @@ void login_profile_go(int index) {
 }
 static void on_profiles(int ok, const char *err, void *ud) { (void)ud; L.loadingProfiles = 0;
   if (!ok) { if (!nv_signed_in()) { login_back_to_form(); } snprintf(L.err, sizeof L.err, "%s", T(err && *err ? err : "Sign-in failed")); return; }
-  NvProfile p; if (nv_profile_count() == 1 && nv_profile_get(0, &p) && !p.pin) { login_profile_go(p.index); return; } /* one profile, no PIN: straight in */
   if (getenv("SB_NV_PROFILE")) { login_profile_go(atoi(getenv("SB_NV_PROFILE"))); return; } /* development: chosen without the remote */
   profiles_open(PF_SIGNIN);
 }

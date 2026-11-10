@@ -15,5 +15,9 @@
 "Couldn’t get a sign-in code": "Nie udało się pobrać kodu logowania",
 "Couldn’t reach Nuvio": "Brak połączenia z Nuvio",
 "Wrong email or password": "Nieprawidłowy e-mail lub hasło",
-"signed out": "wylogowano"
+"signed out": "wylogowano",
+"Add profile": "Dodaj profil",
+"Adding…": "Dodawanie…",
+"Enter a name": "Wpisz nazwę",
+"Couldn’t add the profile": "Nie udało się dodać profilu"
 }

@@ -8,10 +8,11 @@ from urllib.parse import urlparse, parse_qs
 PORT, LOG = int(sys.argv[1]), sys.argv[2]
 S = {"dead": 0, "fail": 0, "expire": 0, "refuse": 0, "polls": 0}
 LK = threading.Lock()
-PROFILES = [
- {"profile_index": 1, "name": "Sam", "avatar_color_hex": "#1E88E5", "uses_primary_addons": False, "is_primary": True},
+BASE = [
+ {"profile_index": 1, "name": "Sam", "avatar_color_hex": "#1E88E5", "uses_primary_addons": False, "is_primary": True, "avatar_id": "av1", "avatar_url": None, "profile_background_id": "bg1", "profile_background_url": "https://example.test/b.png", "uses_primary_plugins": True},
  {"profile_index": 2, "name": "Kids", "avatar_color_hex": "#E53935", "uses_primary_addons": False, "is_primary": False},
  {"profile_index": 3, "name": "Locked", "avatar_color_hex": "#43A047", "uses_primary_addons": True, "is_primary": False}]
+PROFILES = list(BASE)
 LIB = {1: [{"content_id": "tt0111161", "content_type": "movie", "name": "Shawshank", "poster": "", "added_at": 1700000000000}],
        2: [{"content_id": "tt0317219", "content_type": "movie", "name": "Cars", "poster": "", "added_at": 1700000000000}], 3: []}
 PROG = {1: [{"content_id": "tt0468569", "content_type": "movie", "video_id": "tt0468569", "position": 600000, "duration": 9000000, "last_watched": 1795000000000, "progress_key": "tt0468569"}], 2: [], 3: []}
@@ -36,6 +37,7 @@ class H(BaseHTTPRequestHandler):
         if u.path == "/ctl":
             with LK:
                 for k, v in q.items(): S[k] = int(v[0])
+                if "list" in q: PROFILES[:] = BASE[:int(q["list"][0])]
             return self.out(200, S)
         if u.path.endswith("/manifest.json"):
             name = u.path.split("/")[1]; self.note("manifest", name)
@@ -44,7 +46,7 @@ class H(BaseHTTPRequestHandler):
         if u.path == "/rest/v1/addons":
             g = self.gate(True)
             if g: return self.out(g, {"message": "x"})
-            prof = int(q["profile_id"][0].replace("eq.", "")); self.note("addons", prof); base = "http://127.0.0.1:%d/" % PORT
+            prof = int(q["profile_id"][0].replace("eq.", "")); self.note("addons", prof); base = "http://%s/" % self.headers.get("Host")
             names = ["good1", "good2", "dead"] if prof != 2 else ["good1"]
             return self.out(200, [{"url": base + n + "/manifest.json", "sort_order": i, "enabled": True} for i, n in enumerate(names)])
         self.out(404, {})
@@ -79,6 +81,7 @@ class H(BaseHTTPRequestHandler):
         if fn == "sync_pull_library": self.note("pull_lib", prof); return self.out(200, LIB.get(prof, []) if not b.get("p_offset") else [])
         if fn == "sync_pull_watch_progress": self.note("pull_prog", prof); return self.out(200, PROG.get(prof, []))
         if fn == "sync_pull_watched_items": self.note("pull_wat", prof); return self.out(200, WAT.get(prof, []))
+        if fn == "sync_push_profiles": self.note(fn, b); PROFILES[:] = b["p_profiles"]; return self.out(200, [])
         if fn.startswith("sync_push") or fn.startswith("sync_delete"): self.note(fn, b); return self.out(200, [])
         self.note("unknown", fn); self.out(404, {"message": "no " + fn})
 ThreadingHTTPServer(("127.0.0.1", PORT), H).serve_forever()

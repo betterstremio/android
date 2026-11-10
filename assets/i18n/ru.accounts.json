@@ -15,5 +15,9 @@
 "Couldn’t get a sign-in code": "Не удалось получить код входа",
 "Couldn’t reach Nuvio": "Нет связи с Nuvio",
 "Wrong email or password": "Неверная почта или пароль",
-"signed out": "выход выполнен"
+"signed out": "выход выполнен",
+"Add profile": "Добавить профиль",
+"Adding…": "Добавление…",
+"Enter a name": "Введите имя",
+"Couldn’t add the profile": "Не удалось добавить профиль"
 }

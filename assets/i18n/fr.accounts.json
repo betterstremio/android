@@ -15,5 +15,9 @@
 "Couldn’t get a sign-in code": "Impossible d’obtenir un code de connexion",
 "Couldn’t reach Nuvio": "Impossible de joindre Nuvio",
 "Wrong email or password": "E-mail ou mot de passe incorrect",
-"signed out": "déconnecté"
+"signed out": "déconnecté",
+"Add profile": "Ajouter un profil",
+"Adding…": "Ajout…",
+"Enter a name": "Saisissez un nom",
+"Couldn’t add the profile": "Impossible d’ajouter le profil"
 }

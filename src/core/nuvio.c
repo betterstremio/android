@@ -6,6 +6,7 @@
    on this TV into what came down, and pushes the merged whole. What came down last time is kept ("nvLibIds",
    "nvW") so a removal on either side can be told from something the other side has not seen yet. */
 #include "core/nuvio.h"
+#include <strings.h>
 #include "core/stremio.h"
 #include "core/nuvio_merge.h"
 #include "core/recs.h"
@@ -251,6 +252,39 @@ int nv_profile_kept(int index) { /* this device already holds that profile's add
   if (index == nv_profile_current()) return sb_addons() != NULL;
   char s[160], p[1400]; struct stat st; nv_scope(index, s, sizeof s); snprintf(p, sizeof p, "%s/acct/%s.json", store_data_dir(), s); return stat(p, &st) == 0;
 }
+/* one more profile, with the primary's addons. Nuvio's push takes the account's whole list and this device keeps only part of
+   each row, so it always starts from a fresh pull and sends every row back with all it came with. A list that looks wrong: nothing sent */
+#define NV_MAX_PROFILES 6
+typedef struct { NvDoneCb cb; void *ud; char name[64]; int index; } AddBox;
+static void add_fail(AddBox *x) { x->cb(0, "Couldn\xe2\x80\x99t add the profile", x->ud); free(x); }
+static void row_copy(cJSON *to, const cJSON *row, const char *k) { const cJSON *v = row ? cJSON_GetObjectItemCaseSensitive(row, k) : NULL; cJSON_AddItemToObject(to, k, v ? cJSON_Duplicate(v, 1) : cJSON_CreateNull()); }
+static cJSON *row_full(int index, const char *name, const char *color, const cJSON *row, int primaryAddons, int primaryPlugins) {
+  cJSON *o = cJSON_CreateObject(); cJSON_AddNumberToObject(o, "profile_index", index); cJSON_AddStringToObject(o, "name", name); cJSON_AddStringToObject(o, "avatar_color_hex", color);
+  row_copy(o, row, "avatar_id"); row_copy(o, row, "avatar_url"); row_copy(o, row, "profile_background_id"); row_copy(o, row, "profile_background_url");
+  cJSON_AddBoolToObject(o, "uses_primary_addons", primaryAddons); cJSON_AddBoolToObject(o, "uses_primary_plugins", primaryPlugins); return o;
+}
+static void on_add_pushed(int st, const cJSON *j, void *ud) { (void)j; AddBox *x = ud;
+  if (st < 200 || st >= 300) { add_fail(x); return; }
+  char s[160], p[1400]; nv_scope(x->index, s, sizeof s); snprintf(p, sizeof p, "%s/acct/%s.json", store_data_dir(), s); remove(p); /* (a slot freed on the phone: never the old profile's copy) */
+  nv_pull_profiles(x->cb, x->ud); free(x);
+}
+static void on_add_pulled(int st, const cJSON *j, void *ud) {
+  static const char *const COLORS[NV_MAX_PROFILES + 1] = { "#1E88E5", "#1E88E5", "#E53935", "#43A047", "#FB8C00", "#8E24AA", "#00ACC1" };
+  AddBox *x = ud; if (st != 200 || !cJSON_IsArray(j)) { add_fail(x); return; }
+  int used[NV_MAX_PROFILES + 1] = { 0 }, n = 0; const cJSON *row;
+  cJSON_ArrayForEach(row, j) { int idx = (int)js_num(row, "profile_index", 0); if (idx < 1 || idx > NV_MAX_PROFILES || used[idx]) { add_fail(x); return; } used[idx] = 1; n++;
+    if (!strcasecmp(js_str(row, "name", ""), x->name)) { nv_pull_profiles(x->cb, x->ud); free(x); return; } } /* already there (a retry): nothing to send */
+  if (n && !used[1]) { add_fail(x); return; }
+  for (int i = 2; i <= NV_MAX_PROFILES && !x->index; i++) if (!used[i]) x->index = i;
+  if (!x->index) { add_fail(x); return; }
+  cJSON *list = cJSON_CreateArray(); if (!n) cJSON_AddItemToArray(list, row_full(1, "Profile 1", COLORS[1], NULL, 0, 0)); /* an account that never saved its first profile */
+  cJSON_ArrayForEach(row, j) { int idx = (int)js_num(row, "profile_index", 0); char nm[64]; snprintf(nm, sizeof nm, "Profile %d", idx); const char *name = js_str(row, "name", ""), *color = js_str(row, "avatar_color_hex", COLORS[1]);
+    cJSON_AddItemToArray(list, row_full(idx, *name ? name : nm, color, row, js_bool(row, "uses_primary_addons", 0), js_bool(row, "uses_primary_plugins", 0))); }
+  cJSON_AddItemToArray(list, row_full(x->index, x->name, COLORS[x->index], NULL, 1, 0));
+  cJSON *body = cJSON_CreateObject(); cJSON_AddNumberToObject(body, "p_client_max_profiles", NV_MAX_PROFILES); cJSON_AddItemToObject(body, "p_profiles", list);
+  rpc("sync_push_profiles", body, on_add_pushed, x);
+}
+void nv_profile_add(const char *name, NvDoneCb cb, void *ud) { AddBox *x = calloc(1, sizeof *x); x->cb = cb; x->ud = ud; snprintf(x->name, sizeof x->name, "%s", name); rpc("sync_pull_profiles", NULL, on_add_pulled, x); }
 void nv_profile_select(int index) {
   int cur = nv_profile_current(); if (cur == index) return;
   char from[160], to[160]; if (cur) nv_scope(cur, from, sizeof from); nv_scope(index, to, sizeof to);

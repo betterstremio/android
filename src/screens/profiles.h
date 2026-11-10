@@ -4,4 +4,5 @@
 enum { PF_START, PF_SIGNIN, PF_SWITCH }; /* at launch (Home ready behind it), right after signing in, from the top bar or Settings */
 void profiles_open(int mode);
 int  profiles_is_open(void);
+void profiles_at_start(void);   /* at launch: asks if the setting says so; a locked last profile always asks */
 #endif

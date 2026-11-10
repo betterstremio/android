@@ -169,6 +169,28 @@ def t_keys():
     if not alive: return False, 'Back closed the app (the app should take it)'
     return True, '%d key presses reached the app, the highlight moved (%d points changed), Back stays in the app' % (evs, diff)
 
+@test('nuvio-signin')
+def t_nuvio():   # the Stremio | Nuvio switch and the profiles, against tests/nuvio/fake_nuvio.py on this PC
+    import subprocess, tempfile
+    log_f = os.path.join(tempfile.gettempdir(), 'fake_nuvio.log'); open(log_f, 'w').close()
+    srv = subprocess.Popen([sys.executable, '-I', os.path.join(REPO, 'tests', 'nuvio', 'fake_nuvio.py'), '18765', log_f])
+    try:
+        wait(1); signed_out(); u = 'http://%s:18765' % HOST; launch({'SB_NV_URL': u, 'SB_NV_URL2': u, 'SB_NV_KEY': 'k'}); wait(8)
+        a = screen('nuvio-stremio-side'); sx = lambda v, s: int(v * s)
+        at = (sx(0.59, a[0]), sx(0.2, a[1])); before = px(a, *at)
+        sh('input keyevent KEYCODE_DPAD_UP'); wait(0.7); sh('input keyevent KEYCODE_DPAD_RIGHT'); wait(1.5)
+        b = screen('nuvio-nuvio-side'); after = px(b, *at)
+        if not (sum(after[:3]) > 500 and sum(before[:3]) < 400): return False, 'the switch did not move (%s to %s)' % (before, after)
+        wait(9); c = screen('nuvio-profiles')   # the fake phone approves on the second check
+        sh('input keyevent KEYCODE_DPAD_RIGHT'); wait(0.7); sh('input keyevent KEYCODE_DPAD_CENTER'); wait(9)
+        st = sh("run-as %s cat files/data/state.json" % PKG); L = log()
+        if crashed(L): return False, 'crashed'
+        if '"nvProfile":"2"' not in st: return False, 'the Kids profile was not chosen with the remote'
+        if '[nuvio] addons: 0 -> 1' not in L: return False, 'its addons did not come down'
+        return True, 'the switch moved, the code was approved, Kids chosen with the remote, addons and library came down'
+    finally:
+        srv.kill(); signed_out()
+
 @test('home')
 def t_home():
     if not restore_signin(): return None, 'no saved session (run with --save-signin once after signing in)'

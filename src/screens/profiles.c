@@ -10,14 +10,17 @@
 #include "core/nuvio.h"
 #include "core/sync.h"
 #include "core/stremio.h"
+#include "core/store.h"
 #include "ui/gfx.h"
 #include "ui/text.h"
 #include "ui/widgets.h"
+#include "ui/osk.h"
+#include <strings.h>
 #include <stdio.h>
 #include <string.h>
 
 #define MAXP 8
-static struct { int open, was, mode, idx, pinMode, pad, busy; double at, outAt; char pin[12], err[96]; NvProfile pinFor; float foc[MAXP]; } P;
+static struct { int open, was, mode, idx, pinMode, addMode, pad, busy; char addName[24]; Osk osk; double at, outAt; char pin[12], err[96]; NvProfile pinFor; float foc[MAXP]; } P;
 static Screen overlay;
 
 int profiles_is_open(void) { return P.open; }
@@ -32,7 +35,16 @@ static void leave_for(int index) {
 }
 static void on_pin(int ok, const char *err, void *ud) { (void)ud; P.busy = 0; if (!P.open || !P.pinMode) return;
   if (ok) { leave_for(P.pinFor.index); return; } P.pin[0] = 0; snprintf(P.err, sizeof P.err, "%s", T(err ? err : "Wrong PIN")); }
+static int can_add(void) { return nv_profile_count() < 6; } /* (Nuvio's limit) */
+static int tile_count(void) { int n = nv_profile_count(); if (n > MAXP) n = MAXP; return n + can_add(); }
+static void on_added(int ok, const char *err, void *ud) { (void)ud; P.busy = 0; if (!P.open || !P.addMode) return;
+  if (!ok) { snprintf(P.err, sizeof P.err, "%s", T(err ? err : "Couldn\xe2\x80\x99t add the profile")); return; }
+  P.addMode = 0; P.err[0] = 0; osk_close(&P.osk); NvProfile p; for (int i = 0; i < nv_profile_count() && i < MAXP; i++) if (nv_profile_get(i, &p) && !strcasecmp(p.name, P.addName)) P.idx = i; }
+static void add_open(void) { P.addMode = 1; P.addName[0] = 0; P.err[0] = 0; osk_open(&P.osk); P.osk.shift = 1; }
+static void add_submit(void) { size_t n = strlen(P.addName); while (n && P.addName[n - 1] == ' ') P.addName[--n] = 0;
+  if (!n) { snprintf(P.err, sizeof P.err, "%s", T("Enter a name")); return; } P.busy = 1; nv_profile_add(P.addName, on_added, NULL); }
 static void choose(int i) {
+  if (i >= nv_profile_count()) { add_open(); return; }
   NvProfile p; if (!nv_profile_get(i, &p)) return;
   if (!p.pin) { leave_for(p.index); return; }
   P.pinFor = p; P.pinMode = 1; P.pad = 0; P.pin[0] = 0; P.err[0] = 0;
@@ -46,12 +58,17 @@ static void pad_press(int k) {
 static int current_locked(void) { NvProfile p; for (int i = 0; i < nv_profile_count(); i++) if (nv_profile_get(i, &p) && p.index == nv_profile_current()) return p.pin; return 0; }
 static int key(int k) {
   if (!P.open || (P.mode == PF_START && !app_splash_done)) return 1;
+  if (P.addMode) {
+    if (P.busy) return 1;
+    if (k == K_BACK && !P.addName[0]) { P.addMode = 0; P.err[0] = 0; osk_close(&P.osk); return 1; }
+    P.err[0] = 0; if (osk_key(&P.osk, k, P.addName, 21) == 2) add_submit();
+    return 1; }
   if (P.pinMode) {
     if (k == K_BACK) { P.pinMode = 0; P.err[0] = 0; return 1; }
     int c = P.pad % 3, r = P.pad / 3;
     if (k == K_LEFT && c > 0) P.pad--; else if (k == K_RIGHT && c < 2) P.pad++; else if (k == K_UP && r > 0) P.pad -= 3; else if (k == K_DOWN && r < 3) P.pad += 3; else if (k == K_OK) pad_press(P.pad);
     return 1; }
-  int n = nv_profile_count(); if (n > MAXP) n = MAXP;
+  int n = tile_count();
   if (k == K_LEFT && P.idx > 0) P.idx--; else if (k == K_RIGHT && P.idx < n - 1) P.idx++;
   else if (k == K_OK) choose(P.idx);
   else if (k == K_BACK) {
@@ -60,7 +77,7 @@ static int key(int k) {
     else close_now(); }
   return 1;
 }
-static void tick(float dt) { float a = dt * 14 > 1 ? 1 : dt * 14; for (int i = 0; i < MAXP; i++) P.foc[i] += ((i == P.idx && !P.pinMode ? 1.0f : 0.0f) - P.foc[i]) * a; }
+static void tick(float dt) { osk_tick(&P.osk, dt); float a = dt * 14 > 1 ? 1 : dt * 14; for (int i = 0; i < MAXP; i++) P.foc[i] += ((i == P.idx && !P.pinMode ? 1.0f : 0.0f) - P.foc[i]) * a; }
 static void h_foc(int i, int b) { (void)b; if (!P.pinMode) P.idx = i; else P.pad = i; }
 static void h_act(int i, int b) { (void)b; if (!P.open) return; if (P.pinMode) pad_press(i); else { P.idx = i; choose(i); } }
 static void disc(float x, float y, float D, unsigned color, const char *name, float foc, int lock) {
@@ -73,18 +90,31 @@ static void disc(float x, float y, float D, unsigned color, const char *name, fl
   text_draw(name, cx, y + D + 34, 32, foc > 0.5f ? 700 : 500, WHITE_A(foc > 0.5f ? 255 : 190), 0, D + 40, ALIGN_CENTER);
   if (lock) text_draw(T("PIN"), cx, y + D + 34 + text_line_height(32) + 4, 22, 600, WHITE_A(150), 1, 0, ALIGN_CENTER);
 }
+static void add_tile(float x, float y, float D, float foc) {
+  float s = 1 + 0.08f * foc, cx = x + D / 2, cy = y + D / 2; gfx_scale_push(s, s, cx, cy);
+  if (foc > 0.01f) gfx_ring(x - 10, y - 10, D + 20, D + 20, (D + 20) / 2, 5, WHITE_A((int)(240 * foc)));
+  gfx_rrect(x, y, D, D, D / 2, WHITE_A(26)); float px = D * 0.5f; text_draw("+", cx, cy - text_line_height(px) / 2, px, 500, WHITE_A(230), 0, 0, ALIGN_CENTER);
+  gfx_scale_pop();
+  text_draw(T("Add profile"), cx, y + D + 34, 32, foc > 0.5f ? 700 : 500, WHITE_A(foc > 0.5f ? 255 : 190), 0, D + 40, ALIGN_CENTER);
+}
 static void draw(void) {
   if (!P.was) return; double t = app_now(); float op;
   if (P.open) { op = (float)(t - P.at) / 0.2f; if (op > 1) op = 1; } else { op = 1 - (float)(t - P.outAt) / 0.18f; if (op <= 0) return; }
   gfx_opacity_push(op);
   if (P.mode == PF_SIGNIN) login_backdrop_draw();
-  else gfx_rect(0, 0, SB_W, SB_H, (P.mode == PF_START && current_locked()) || P.pinMode ? PAGE | 0xff000000u : RGBA(8, 8, 14, 225)); /* a locked profile's Home shows nothing until its PIN */
+  else gfx_rect(0, 0, SB_W, SB_H, (P.mode == PF_START && current_locked()) || P.pinMode || P.addMode ? PAGE | 0xff000000u : RGBA(8, 8, 14, 225)); /* a locked profile's Home shows nothing until its PIN */
   if (P.open) hit_shield(0, 0, SB_W, SB_H);
-  if (!P.pinMode) {
-    int n = nv_profile_count(); if (n > MAXP) n = MAXP; float D = n <= 5 ? 190 : 140, G = n <= 5 ? 64 : 40, W = n * D + (n - 1) * G, x = SB_W / 2 - W / 2, y = SB_H / 2 - D / 2 - 30;
+  if (P.addMode) {
+    float kw = 10 * 76 + 9 * 8, fx = SB_W / 2 - kw / 2, fy = 270, fh = 92; char shown[32]; snprintf(shown, sizeof shown, "%s|", P.addName);
+    text_draw(T("Add profile"), SB_W / 2, 130, 60, 700, WHITE_A(255), -0.5f, 0, ALIGN_CENTER);
+    gfx_rrect(fx, fy, kw, fh, 20, WHITE_A(26)); text_draw(shown, SB_W / 2, fy + fh / 2 - text_line_height(38) / 2, 38, 600, WHITE_A(240), 0, kw - 40, ALIGN_CENTER);
+    if (P.busy || P.err[0]) text_draw(P.busy ? T("Adding\xe2\x80\xa6") : P.err, SB_W / 2, fy + fh + 14, 26, 500, P.busy ? WHITE_A(190) : RGB(0xff, 0x9a, 0x9a), 0, 800, ALIGN_CENTER);
+    osk_draw(&P.osk, fx, fy + fh + 66, kw);
+  } else if (!P.pinMode) {
+    int n = tile_count(); float D = n <= 5 ? 190 : 140, G = n <= 5 ? 64 : 40, W = n * D + (n - 1) * G, x = SB_W / 2 - W / 2, y = SB_H / 2 - D / 2 - 30;
     text_draw(T("Who\xe2\x80\x99s watching?"), SB_W / 2, y - 150, 60, 700, WHITE_A(255), -0.5f, 0, ALIGN_CENTER);
-    for (int i = 0; i < n; i++) { NvProfile p; if (!nv_profile_get(i, &p)) continue; float px = app_rtl() ? x + W - D - i * (D + G) : x + i * (D + G);
-      disc(px, y, D, p.color, p.name, P.foc[i], p.pin); if (P.open) hit_add(px, y, D, D, h_foc, h_act, i, 0); }
+    for (int i = 0; i < n; i++) { NvProfile p; int real = nv_profile_get(i, &p); float px = app_rtl() ? x + W - D - i * (D + G) : x + i * (D + G);
+      if (real) disc(px, y, D, p.color, p.name, P.foc[i], p.pin); else add_tile(px, y, D, P.foc[i]); if (P.open) hit_add(px, y, D, D, h_foc, h_act, i, 0); }
   } else {
     static const char *const L[12] = { "1", "2", "3", "4", "5", "6", "7", "8", "9", "<", "0", "OK" };
     float KW = 130, KH = 92, G = 14, pw = 3 * KW + 2 * G, x0 = SB_W / 2 - pw / 2, y0 = SB_H / 2 - 110;
@@ -99,8 +129,9 @@ static void draw(void) {
   gfx_opacity_pop();
 }
 static Screen overlay = { NULL, NULL, key, tick, draw, NULL, NULL, NULL };
+void profiles_at_start(void) { if (!acct_is_nuvio() || !sb_signed_in()) return; if ((nv_profile_count() > 1 && strcmp(store_get("askProfile", "true"), "false")) || current_locked()) profiles_open(PF_START); }
 void profiles_open(int mode) {
-  P.open = 1; P.was = 1; P.mode = mode; P.pinMode = 0; P.busy = 0; P.err[0] = 0; P.idx = 0; P.at = app_now();
+  fprintf(stderr, "[profiles] open, mode %d\n", mode); P.open = 1; P.was = 1; P.mode = mode; P.pinMode = 0; P.addMode = 0; P.osk.open = 0; P.osk.a.v = 0; P.busy = 0; P.err[0] = 0; P.idx = 0; P.at = app_now();
   NvProfile p; for (int i = 0; i < nv_profile_count() && i < MAXP; i++) if (nv_profile_get(i, &p) && p.index == nv_profile_current()) P.idx = i;
   app_overlay = &overlay;
 }

@@ -15,5 +15,9 @@
 "Couldn’t get a sign-in code": "Oturum açma kodu alınamadı",
 "Couldn’t reach Nuvio": "Nuvio’ya ulaşılamıyor",
 "Wrong email or password": "E-posta veya parola yanlış",
-"signed out": "oturum kapatıldı"
+"signed out": "oturum kapatıldı",
+"Add profile": "Profil ekle",
+"Adding…": "Ekleniyor…",
+"Enter a name": "Bir ad girin",
+"Couldn’t add the profile": "Profil eklenemedi"
 }

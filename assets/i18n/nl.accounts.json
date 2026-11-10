@@ -15,5 +15,9 @@
 "Couldn’t get a sign-in code": "Kon geen inlogcode ophalen",
 "Couldn’t reach Nuvio": "Kan Nuvio niet bereiken",
 "Wrong email or password": "Onjuist e-mailadres of wachtwoord",
-"signed out": "uitgelogd"
+"signed out": "uitgelogd",
+"Add profile": "Profiel toevoegen",
+"Adding…": "Toevoegen…",
+"Enter a name": "Voer een naam in",
+"Couldn’t add the profile": "Profiel kon niet worden toegevoegd"
 }

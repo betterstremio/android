@@ -264,8 +264,7 @@ int main(int argc, char **argv) {
   app_register(SCR_DETAIL, &detailScreen); app_register(SCR_SIM, &simScreen); app_register(SCR_CAT, &catScreen); app_register(SCR_COL, &colScreen); app_register(SCR_SEARCH, &searchScreen); app_register(SCR_SET, &setScreen); app_card_menu_hook = cwmenu_show;
   if (sb_signed_in() || getenv("SB_SKIP_LOGIN")) { app_go(SCR_HOME, NULL, 1); splash_start(1, 0); } /* SB_SKIP_LOGIN: the default rows without an account (development) */
   else { app_splash_done = 1; app_go(SCR_LOGIN, NULL, 1); }
-  if (sb_signed_in() && acct_is_nuvio() && nv_profile_count() > 1 && strcmp(store_get("askProfile", "true"), "false")) profiles_open(PF_START); /* Home is built behind it for the last profile */
-  else if (sb_signed_in() && acct_is_nuvio() && nv_profile_count() == 1) { NvProfile np; if (nv_profile_get(0, &np) && np.pin) profiles_open(PF_START); }
+  profiles_at_start(); /* a Nuvio account: "Who's watching?", with Home built behind it for the last profile */
 
   const char *shot = getenv("SB_SHOT"); int shotAt = shot ? atoi(getenv("SB_SHOT_FRAME") ? getenv("SB_SHOT_FRAME") : "40") : -1;
   const char *script = getenv("SB_SCRIPT");
