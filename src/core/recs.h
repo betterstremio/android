@@ -39,5 +39,6 @@ const char *recs_region_name(const char *cc);   /* "India" */
 void recs_status(char *out, size_t cap);  /* Settings' line: on/off, why not, how many picks, how fresh */
 int  recs_region_count(void);
 const char *recs_region_code(int i);
+void recs_account_changed(void);          /* another account or profile: its own saved page, nothing asked for yet */
 void recs_refresh(void);                  /* ask again now (a setting changed) */
 #endif

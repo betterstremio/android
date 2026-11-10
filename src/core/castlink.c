@@ -41,7 +41,7 @@ static void on_key(int k) {
 /* the phone's account: this TV follows it (signed out, or another user: signed in as the phone is, its addons and
    library brought down and Home made again, as a sign-in here); the same user, or a phone signed out: left as it is */
 static void on_account(const char *ak, const char *userJson) {
-  if (!ak || !*ak) return; cJSON *u = cJSON_Parse(userJson ? userJson : ""); const cJSON *id = cJSON_GetObjectItemCaseSensitive(u, "_id");
+  if (!ak || !*ak || acct_is_nuvio()) return; /* (a phone's Stremio account never replaces a Nuvio one) */ cJSON *u = cJSON_Parse(userJson ? userJson : ""); const cJSON *id = cJSON_GetObjectItemCaseSensitive(u, "_id");
   int same = sb_signed_in() && cJSON_IsString(id) && sb_user_id() && !strcmp(sb_user_id(), id->valuestring); cJSON_Delete(u);
   if (same || (sb_signed_in() && !strcmp(sb_auth_key(), ak))) return;
   fprintf(stderr, "[cast] account from the phone: %s\n", sb_signed_in() ? "another user" : "signing in");

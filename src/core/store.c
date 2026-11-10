@@ -86,6 +86,32 @@ void store_pump(void) {
   char *t = cJSON_PrintUnformatted(root); if (t) write_later(path, (unsigned char *)t, strlen(t));
 }
 
+/* ---- an account's own data, set aside (profiles) ------------------------------------------- */
+typedef struct { cJSON *o; char path[1300]; } ScopeJob;
+static int scopeBusy; static pthread_mutex_t scopeMu = PTHREAD_MUTEX_INITIALIZER; static pthread_cond_t scopeCv = PTHREAD_COND_INITIALIZER;
+static void scope_write(ScopeJob *j) { char *t = cJSON_PrintUnformatted(j->o); if (t) { if (!write_all(j->path, t, strlen(t))) fprintf(stderr, "[store] could not write %s\n", j->path); free(t); } cJSON_Delete(j->o); free(j); }
+static void *scope_run(void *a) { plat_thread_background(15); scope_write(a); pthread_mutex_lock(&scopeMu); scopeBusy--; pthread_cond_broadcast(&scopeCv); pthread_mutex_unlock(&scopeMu); return NULL; }
+static void scope_wait(void) { pthread_mutex_lock(&scopeMu); while (scopeBusy) pthread_cond_wait(&scopeCv, &scopeMu); pthread_mutex_unlock(&scopeMu); } /* (A, B and straight back to A: A's file is complete before it is read) */
+void store_scope_swap(const char *from, const char *to, const char *const *keys, int n) {
+  char d[1100]; snprintf(d, sizeof d, "%s/acct", dir); mkdir(d, 0755);
+  cJSON *o = cJSON_CreateObject();
+  for (int i = 0; i < n; i++) { cJSON *v = cJSON_DetachItemFromObjectCaseSensitive(root, keys[i]); if (v) cJSON_AddItemToObject(o, keys[i], v); }
+  touch();
+  if (!from) cJSON_Delete(o);
+  else { ScopeJob *j = malloc(sizeof *j); j->o = o; snprintf(j->path, sizeof j->path, "%s/%s.json", d, from); pthread_t t;
+    pthread_mutex_lock(&scopeMu); scopeBusy++; pthread_mutex_unlock(&scopeMu);
+    if (pthread_create(&t, NULL, scope_run, j) == 0) pthread_detach(t); else { pthread_mutex_lock(&scopeMu); scopeBusy--; pthread_mutex_unlock(&scopeMu); scope_write(j); } }
+  scope_wait();
+  char p[1300]; snprintf(p, sizeof p, "%s/%s.json", d, to); char *b = read_all(p, NULL); cJSON *in = b ? cJSON_Parse(b) : NULL; free(b);
+  if (in) for (int i = 0; i < n; i++) { cJSON *v = cJSON_DetachItemFromObjectCaseSensitive(in, keys[i]); if (v) cJSON_AddItemToObject(root, keys[i], v); }
+  cJSON_Delete(in); touch();
+}
+void store_scope_forget(const char *prefix) {
+  scope_wait(); char d[1100]; snprintf(d, sizeof d, "%s/acct", dir); DIR *h = opendir(d); if (!h) return; struct dirent *e; size_t pl = strlen(prefix);
+  while ((e = readdir(h))) if (!strncmp(e->d_name, prefix, pl)) { char p[1400]; snprintf(p, sizeof p, "%s/%s", d, e->d_name); remove(p); }
+  closedir(h);
+}
+
 /* ---- file cache ---------------------------------------------------------------------------- */
 static void cache_path(const char *key, char *out, size_t cap) {
   unsigned long long h1 = 1469598103934665603ULL; unsigned h2 = 2166136261u; for (const unsigned char *p = (const unsigned char *)key; *p; p++) { h1 = (h1 ^ *p) * 1099511628211ULL; h2 = (h2 ^ *p) * 16777619u; }

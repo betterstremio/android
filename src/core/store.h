@@ -24,4 +24,8 @@ long           cache_cap_bytes(void);         /* the cap given to cache_prune_st
 long           cache_kept_bytes(void);        /* the cache folder's size after the prune at start (-1 until it ran) */
 void           cache_write(const char *key, const unsigned char *data, size_t len);
 const char    *store_data_dir(void);
+/* one account's own keys set aside and another's put back, in the data folder's acct/ (from NULL: nothing set aside).
+   The old data is written by a thread; the new one is read here (a deliberate switch, a few ms) */
+void           store_scope_swap(const char *from, const char *to, const char *const *keys, int n);
+void           store_scope_forget(const char *prefix);   /* removes every acct/ file starting with prefix */
 #endif

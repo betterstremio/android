@@ -1,0 +1,19 @@
+{
+"Who’s watching?": "Кто смотрит?",
+"PIN": "PIN",
+"Enter PIN": "Введите PIN",
+"Wrong PIN": "Неверный PIN",
+"Your Nuvio session ended. Sign in again": "Сеанс Nuvio завершён. Войдите снова",
+"Switch profile": "Сменить профиль",
+"See who’s watching": "Показать, кто смотрит",
+"Ask who’s watching at start": "Спрашивать при запуске, кто смотрит",
+"Off: straight into the last profile": "Выкл.: сразу последний профиль",
+"Profile": "Профиль",
+"Your Nuvio profiles": "Ваши профили Nuvio",
+"Couldn’t load your profiles": "Не удалось загрузить профили",
+"Couldn’t check the PIN": "Не удалось проверить PIN",
+"Couldn’t get a sign-in code": "Не удалось получить код входа",
+"Couldn’t reach Nuvio": "Нет связи с Nuvio",
+"Wrong email or password": "Неверная почта или пароль",
+"signed out": "выход выполнен"
+}

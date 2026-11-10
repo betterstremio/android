@@ -1,0 +1,19 @@
+{
+"Who’s watching?": "Wie kijkt er?",
+"PIN": "PIN",
+"Enter PIN": "Voer de pincode in",
+"Wrong PIN": "Onjuiste pincode",
+"Your Nuvio session ended. Sign in again": "Je Nuvio-sessie is beëindigd. Log opnieuw in",
+"Switch profile": "Van profiel wisselen",
+"See who’s watching": "Bekijk wie er kijkt",
+"Ask who’s watching at start": "Bij het starten vragen wie er kijkt",
+"Off: straight into the last profile": "Uit: meteen het laatste profiel",
+"Profile": "Profiel",
+"Your Nuvio profiles": "Je Nuvio-profielen",
+"Couldn’t load your profiles": "Profielen konden niet worden geladen",
+"Couldn’t check the PIN": "Pincode kon niet worden gecontroleerd",
+"Couldn’t get a sign-in code": "Kon geen inlogcode ophalen",
+"Couldn’t reach Nuvio": "Kan Nuvio niet bereiken",
+"Wrong email or password": "Onjuist e-mailadres of wachtwoord",
+"signed out": "uitgelogd"
+}

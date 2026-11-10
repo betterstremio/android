@@ -18,12 +18,16 @@
 #include <stdio.h>
 #include <string.h>
 #include "core/hit.h"
+#include "core/nuvio.h"
+#include "screens/profiles.h"
+#include <stdlib.h>
 
 static struct {
-  int zone;                 /* 0 email, 1 password, 2 button */
+  int zone;                 /* 0 email, 1 password, 2 button, 3 the service (Stremio | Nuvio) */
+  int svc, polling, loadingProfiles; /* svc: 0 Stremio, 1 Nuvio */
   int editing;              /* OK on a field: typing goes in */
   char email[128], pass[128], err[256];
-  char code[16], link[256], stat[128]; int qrOk, started; double pollAt; unsigned pollReq;
+  char code[32], link[400], stat[128]; int qrOk, started; double pollAt; unsigned pollReq;
   int revealed; double revealAt; Timer1 in;
   int done; Timer1 doneT; int left; double doneAt; int restarting; Timer1 restart;
   Nudge nudge; double t0;
@@ -32,21 +36,30 @@ static struct {
 
 static void reveal(void) { if (L.revealed) return; L.revealed = 1; timer_start(&L.in, 0.79f); }
 static void on_read(int status, const unsigned char *body, size_t len, void *ud) {
-  (void)len; (void)ud; L.pollReq = 0; if (status != 200 || L.done) return;
+  (void)len; (void)ud; L.pollReq = 0; if (status != 200 || L.done || L.svc) return;
   cJSON *j = net_json(body); if (!j) return;
   const cJSON *r = js_obj(j, "result"); const char *ak = js_str(r, "authKey", NULL); if (!ak) ak = js_str(r, "auth_key", NULL);
   if (ak && *ak) { char k[256]; snprintf(k, sizeof k, "%s", ak); cJSON_Delete(j); extern void login_finish(const char *); login_finish(k); return; }
   cJSON_Delete(j);
 }
 static void on_create(int status, const unsigned char *body, size_t len, void *ud) {
-  (void)len; (void)ud; cJSON *j = status == 200 ? net_json(body) : NULL;
+  (void)len; (void)ud; if (L.svc) return; cJSON *j = status == 200 ? net_json(body) : NULL;
   const char *code = js_str(j, "code", NULL), *link = js_str(j, "link", NULL);
   if (!code || !*code) { snprintf(L.stat, sizeof L.stat, "%s", T("QR unavailable — use email")); reveal(); cJSON_Delete(j); return; }
   snprintf(L.code, sizeof L.code, "%s", code); snprintf(L.link, sizeof L.link, "%s", link ? link : ""); if (!L.link[0]) snprintf(L.link, sizeof L.link, "https://link.stremio.com/%s", code);
   L.stat[0] = 0; L.qrOk = 1; /* (no status under the code: it simply works) */ L.pollAt = app_now() + 2.5; reveal(); /* everything comes in once the code is drawn */
   cJSON_Delete(j);
 }
-static void start_qr(void) { if (L.started) return; L.started = 1; L.stat[0] = 0; net_get("https://link.stremio.com/api/create", on_create, NULL); }
+static void on_nv_qr(int ok, const char *err, void *ud) { (void)ud; if (!L.svc) return;
+  if (!ok) { snprintf(L.stat, sizeof L.stat, "%s", T(err && *err ? err : "QR unavailable \xe2\x80\x94 use email")); reveal(); return; }
+  snprintf(L.code, sizeof L.code, "%s", nv_qr_code()); snprintf(L.link, sizeof L.link, "%s", nv_qr_link());
+  L.stat[0] = 0; L.qrOk = 1; L.pollAt = app_now() + nv_qr_poll_s(); reveal();
+}
+static void start_qr(void) { if (L.started) return; L.started = 1; L.stat[0] = 0; L.qrOk = 0; if (L.svc) nv_qr_start(on_nv_qr, NULL); else net_get("https://link.stremio.com/api/create", on_create, NULL); }
+static void set_service(int v) { /* only the chosen service is asked: a Stremio user never reaches Nuvio's server */
+  if (v == L.svc || (v && !nv_configured()) || L.done || L.loadingProfiles) return; L.svc = v; if (L.pollReq) net_cancel(L.pollReq); L.pollReq = 0; L.polling = 0;
+  L.qrOk = 0; L.code[0] = L.link[0] = L.stat[0] = L.err[0] = 0; L.started = 0; start_qr();
+}
 static void step(void) { if (--L.left <= 0 && !L.restarting) { L.restarting = 1; timer_start(&L.restart, 0.5f); } }
 static void on_user(int ok, const char *err, void *ud) { (void)ok; (void)err; (void)ud; step(); }
 static void on_addons(int changed, void *ud) { (void)changed; (void)ud; step(); }
@@ -57,15 +70,39 @@ void login_finish(const char *ak) {
   if (L.done) return; L.done = 1; L.editing = 0; SDL_StopTextInput(); timer_start(&L.doneT, 0.6f); L.doneAt = app_now(); L.left = 3;
   sb_finish_login(ak, on_user, NULL); sb_sync_addons(on_addons, NULL); sb_pull_library(on_lib, NULL);
 }
+void login_profile_go(int index) {
+  if (L.done) return; nv_profile_select(index);
+  L.done = 1; L.editing = 0; SDL_StopTextInput(); osk_close(&L.osk); timer_start(&L.doneT, 0.6f); L.doneAt = app_now(); L.left = 2;
+  sb_sync_addons(on_addons, NULL); sb_pull_library(on_lib, NULL);
+}
+static void on_profiles(int ok, const char *err, void *ud) { (void)ud; L.loadingProfiles = 0;
+  if (!ok) { if (!nv_signed_in()) { login_back_to_form(); } snprintf(L.err, sizeof L.err, "%s", T(err && *err ? err : "Sign-in failed")); return; }
+  NvProfile p; if (nv_profile_count() == 1 && nv_profile_get(0, &p) && !p.pin) { login_profile_go(p.index); return; } /* one profile, no PIN: straight in */
+  if (getenv("SB_NV_PROFILE")) { login_profile_go(atoi(getenv("SB_NV_PROFILE"))); return; } /* development: chosen without the remote */
+  profiles_open(PF_SIGNIN);
+}
+static void nv_signed(void) { L.qrOk = 0; L.loadingProfiles = 1; L.editing = 0; SDL_StopTextInput(); osk_close(&L.osk); nv_pull_profiles(on_profiles, NULL); }
+void login_back_to_form(void) { nv_logout(); L.loadingProfiles = 0; L.svc = 1; L.started = 0; L.err[0] = 0; start_qr(); }
+static void on_nv_poll(int ok, const char *err, void *ud) { (void)ud; L.polling = 0; if (L.done) return;
+  if (ok) { L.svc = 1; nv_signed(); return; }
+  if (!L.svc) return;
+  if (err && !strcmp(err, "expired")) { L.started = 0; start_qr(); return; } /* a fresh code */
+  L.pollAt = app_now() + nv_qr_poll_s();
+}
+static void on_nv_login(int ok, const char *err, void *ud) { (void)ud;
+  if (!ok) { snprintf(L.err, sizeof L.err, "%s", T(err && *err ? err : "Sign-in failed")); return; } L.err[0] = 0; nv_signed();
+}
 static void on_login(int ok, const char *err, void *ud) { (void)ud;
   if (!ok) { snprintf(L.err, sizeof L.err, "%s", err && *err ? err : T("Sign-in failed")); return; }
   L.err[0] = 0; /* sb_login stored the key and the user */ login_finish(sb_auth_key());
 }
 static void do_email(void) {
   if (!L.email[0] || !L.pass[0]) { snprintf(L.err, sizeof L.err, "%s", T("Enter email and password")); return; }
-  L.err[0] = 0; toast(T("Signing in…"), 1500, NULL); sb_login(L.email, L.pass, on_login, NULL);
+  L.err[0] = 0; toast(T("Signing in…"), 1500, NULL); if (L.svc) nv_login_email(L.email, L.pass, on_nv_login, NULL); else sb_login(L.email, L.pass, on_login, NULL);
 }
-static void enter(const void *p) { (void)p;
+static void enter(const void *p) {
+  if (p && !strncmp((const char *)p, "load:", 5)) { memset(&L.nudge, 0, sizeof L.nudge); L.done = 0; L.restarting = 0; login_profile_go(atoi((const char *)p + 5)); return; } /* a profile new on this device */
+  if (acct_is_nuvio() && nv_signed_in()) { L.svc = 1; reveal(); nv_signed(); return; } /* signed in, no profile chosen yet */
   L.zone = 0; L.editing = 0; L.t0 = app_now(); if (!L.revealed) L.revealAt = app_now() + 1.6; /* the halves wait for the QR code (1.6 s at most), then rise in together */
   start_qr();
 }
@@ -81,6 +118,8 @@ static int key(int k) {
     return 1;
   }
   if (k == K_BACK) { app_quit(); return 1; } /* nowhere to go back to: Back closes the app */
+  if (L.zone == 3) { if (k == K_LEFT) set_service(0); else if (k == K_RIGHT) set_service(1); else if (k == K_OK) set_service(!L.svc); else if (k == K_DOWN) L.zone = 0; else nudge_start(&L.nudge, k); return 1; }
+  if (k == K_UP && L.zone == 0 && nv_configured()) { L.zone = 3; return 1; }
   if ((k == K_DOWN && L.zone == 2) || (k == K_UP && L.zone == 0) || k == K_LEFT || k == K_RIGHT) { nudge_start(&L.nudge, k); return 1; }
   if (k == K_DOWN) L.zone = L.zone < 2 ? L.zone + 1 : 2;
   else if (k == K_UP) L.zone = L.zone > 0 ? L.zone - 1 : 0;
@@ -91,7 +130,8 @@ static void text(const char *s) { if (!L.editing || L.done) return; char *f = L.
 static void tick(float dt) {
   timer_tick(&L.in, dt); nudge_tick(&L.nudge, dt); osk_tick(&L.osk, dt);
   if (!L.revealed && app_now() >= L.revealAt) reveal();
-  if (L.qrOk && !L.done && !L.pollReq && app_now() >= L.pollAt) { char u[320]; snprintf(u, sizeof u, "https://link.stremio.com/api/read?code=%s", L.code); L.pollReq = net_get(u, on_read, NULL); L.pollAt = app_now() + 2.5; }
+  if (L.svc) { if (L.qrOk && !L.done && !L.polling && app_now() >= L.pollAt) { L.polling = 1; nv_qr_poll(on_nv_poll, NULL); } }
+  else if (L.qrOk && !L.done && !L.pollReq && app_now() >= L.pollAt) { char u[320]; snprintf(u, sizeof u, "https://link.stremio.com/api/read?code=%s", L.code); L.pollReq = net_get(u, on_read, NULL); L.pollAt = app_now() + 2.5; }
   if (L.done) { timer_tick(&L.doneT, dt);
     if (!L.restarting && app_now() - L.doneAt > 9) { L.restarting = 1; timer_start(&L.restart, 0.5f); } /* a slow network never keeps it here */
     if (L.restarting && timer_tick(&L.restart, dt) >= 1 && !L.restart.on) { /* the app restarts behind the start screen */
@@ -101,6 +141,7 @@ static void tick(float dt) {
 static void blob(float cx, float cy, uint32_t c, float peak) {
   float R = 550; gfx_alpha_tex(gfx_radial_tex(), cx - R, cy - R, 2 * R, 2 * R, col_alpha(c, peak * 0.55f)); /* a soft disc from a small texture: one cheap quad */
 }
+static void sw_act(int v, int b) { (void)b; set_service(v); }
 static void zone_focus(int z, int b) { (void)b; if (L.zone != z) { if (L.editing) { L.editing = 0; SDL_StopTextInput(); osk_close(&L.osk); } L.zone = z; } }
 static double glowT0 = -1; /* the glows' own clock: kept past signing in, the start screen carries them on */
 void login_glows_draw(void) {
@@ -142,10 +183,18 @@ static void draw(void) {
   by -= L.osk.a.v * (osk_height() + 30) / 2; /* the keyboard below: the box moves up to share the screen */
   float doneK = L.done ? ease_apply(EASE_OUT, timer_x(&L.doneT) * 0.6f / 0.45f > 1 ? 1 : timer_x(&L.doneT) * 0.6f / 0.45f) : 0;
   float boxA = L.done ? 1 - (timer_x(&L.doneT) * 0.6f / 0.35f > 1 ? 1 : timer_x(&L.doneT) * 0.6f / 0.35f) : 1;
+  if (profiles_is_open() || L.loadingProfiles) boxA = 0; /* the profiles have the screen */
   if (boxA > 0.001f) {
     gfx_opacity_push(boxA); gfx_scale_push(1 - 0.04f * doneK, 1 - 0.04f * doneK, SB_W / 2, SB_H / 2);
     float inX = L.in.on ? timer_x(&L.in) : (L.revealed ? 1 : 0);
     float k1 = L.revealed ? ease_apply(EASE_OUT, inX * 0.79f / 0.7f > 1 ? 1 : inX * 0.79f / 0.7f) : 0, k2 = L.revealed ? ease_apply(EASE_OUT, (inX * 0.79f - 0.09f) / 0.7f < 0 ? 0 : (inX * 0.79f - 0.09f) / 0.7f) : 0;
+    if (nv_configured() && L.osk.a.v < 0.01f) { /* which account: Stremio | Nuvio */
+      static const char *const N[2] = { "Stremio", "Nuvio" }; float sw = 220, sh = 72, sx = SB_W / 2 - sw, sy = by - 112; int foc = L.zone == 3;
+      gfx_opacity_push(k1 < 0.004f ? 0.004f : k1); float nx = foc ? nudge_x(&L.nudge) : 0, ny = foc ? nudge_y(&L.nudge) : 0;
+      lpill(sx + nx, sy + ny, 2 * sw, sh, sh / 2, 0, 7); if (foc) gfx_ring(sx - 5 + nx, sy - 5 + ny, 2 * sw + 10, sh + 10, (sh + 10) / 2, 3, WHITE_A(235));
+      for (int i = 0; i < 2; i++) { float x = sx + i * sw; if (L.svc == i) gfx_rrect(x + 6 + nx, sy + 6 + ny, sw - 12, sh - 12, (sh - 12) / 2, WHITE_A(235));
+        text_draw(N[i], x + sw / 2 + nx, sy + sh / 2 - text_line_height(30) / 2 + ny, 30, 700, L.svc == i ? RGB(14, 14, 22) : WHITE_A(210), 0, 0, ALIGN_CENTER); hit_add(x, sy, sw, sh, NULL, sw_act, i, 0); }
+      gfx_opacity_pop(); }
     /* QR half */
     float qx = rtl ? bx + boxW - qrW : bx, qcx = qx + qrW / 2, y = by + (boxH - qrH) / 2;
     gfx_opacity_push(k1 < 0.004f ? 0.004f : k1); gfx_offset_push(0, 18 * (1 - k1));

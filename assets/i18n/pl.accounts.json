@@ -1,0 +1,19 @@
+{
+"Who’s watching?": "Kto ogląda?",
+"PIN": "PIN",
+"Enter PIN": "Wpisz PIN",
+"Wrong PIN": "Nieprawidłowy PIN",
+"Your Nuvio session ended. Sign in again": "Sesja Nuvio wygasła. Zaloguj się ponownie",
+"Switch profile": "Zmień profil",
+"See who’s watching": "Zobacz, kto ogląda",
+"Ask who’s watching at start": "Pytaj przy starcie, kto ogląda",
+"Off: straight into the last profile": "Wył.: od razu ostatni profil",
+"Profile": "Profil",
+"Your Nuvio profiles": "Twoje profile Nuvio",
+"Couldn’t load your profiles": "Nie udało się wczytać profili",
+"Couldn’t check the PIN": "Nie udało się sprawdzić PIN-u",
+"Couldn’t get a sign-in code": "Nie udało się pobrać kodu logowania",
+"Couldn’t reach Nuvio": "Brak połączenia z Nuvio",
+"Wrong email or password": "Nieprawidłowy e-mail lub hasło",
+"signed out": "wylogowano"
+}

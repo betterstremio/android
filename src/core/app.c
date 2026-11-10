@@ -20,6 +20,8 @@
 #include "screens/player.h"
 #include "screens/saver.h"
 #include "core/hit.h"
+#include "core/nuvio.h"
+#include "screens/profiles.h"
 #include "ui/qrcard.h"
 #include "core/recs.h"
 #include "core/sync.h"
@@ -308,6 +310,19 @@ void app_clock_draw(float right, float y, float alpha) {
     gfx_opacity_push(k); text_draw(clockTxt + n, x0 + pw, y + 5 * (1 - k), 38, 600, WHITE_A(230), -0.6f, 0, ALIGN_LEFT); gfx_opacity_pop(); }
   if (alpha < 1) gfx_opacity_pop();
 }
+/* the profile in use: a disc in its colour with its first letter, left of the clock (a Nuvio account only) */
+static int profFoc; /* the disc, right of the tabs (Right from Library): its own focus, not a tab */
+static void prof_act(int i, int b) { (void)i; (void)b; profFoc = 0; profiles_open(PF_SWITCH); }
+static void prof_draw(void) {
+  if (!acct_is_nuvio() || !nv_profile_current() || app_rtl()) return;
+  NvProfile p; int got = 0; for (int i = 0; i < nv_profile_count() && !got; i++) if (nv_profile_get(i, &p) && p.index == nv_profile_current()) got = 1; if (!got) return;
+  float W = text_width("00:00", 38, 600, -0.6f), D = 64, x = SB_W - 48 - W - 26 - 18 - D, y = 50 - D / 2; int foc = profFoc && topNav.active;
+  hit_add_nav(x, y, D, D, NULL, prof_act, 0, 0);
+  if (foc) gfx_ring(x - 6, y - 6, D + 12, D + 12, (D + 12) / 2, 3, WHITE_A(235));
+  gfx_rrect(x, y, D, D, D / 2, RGB((p.color >> 16) & 255, (p.color >> 8) & 255, p.color & 255)); gfx_rrect_v(x, y, D, D, D / 2, WHITE_A(50), WHITE_A(0));
+  char ini[8] = { 0 }; { const unsigned char *u = (const unsigned char *)p.name; int len = !*u ? 0 : (*u & 0x80) ? ((*u & 0xe0) == 0xc0 ? 2 : (*u & 0xf0) == 0xe0 ? 3 : 4) : 1; memcpy(ini, p.name, (size_t)len); } if (ini[0] >= 'a' && ini[0] <= 'z') ini[0] -= 32;
+  text_draw(ini, x + D / 2, y + D / 2 - text_line_height(30) / 2, 30, 800, WHITE_A(255), 0, 0, ALIGN_CENTER);
+}
 static void clock_draw(void) { float W = text_width("00:00", 38, 600, -0.6f); clockLiquid = 1; app_clock_draw(app_rtl() ? 48 + W : SB_W - 48, 50 - 22, 1); clockLiquid = 0; }
 
 /* ---- the top bar: centred tabs, the corner icons, one pill that glides to the focused tab ---- */
@@ -319,7 +334,7 @@ static int chipCur(int i) {
   Scr t = i == NAV_SEARCH ? SCR_SEARCH : i == NAV_SET ? SCR_SET : i == NAV_DISC ? SCR_DISC : i == NAV_HOME ? SCR_HOME : SCR_LIB;
   return t == tab_scr();
 }
-static int chipFocused(int i) { return topNav.active && topNav.idx == i && !update_pill_focused(); } /* the update notice holds the highlight */
+static int chipFocused(int i) { return topNav.active && topNav.idx == i && !profFoc && !update_pill_focused(); } /* the update notice holds the highlight */
 static void topnav_layout(void) {
   float w[3], tot = 0;
   for (int i = 0; i < 3; i++) { int f = chipFocused(NAV_DISC + i) || chipCur(NAV_DISC + i); w[i] = text_width(chipLabel(NAV_DISC + i), 32, f ? 700 : 400, 0) + 80; tot += w[i] + 18; }
@@ -354,7 +369,7 @@ void topnav_switch(int i) {
   app_go(chipScr(i), NULL, 1); topNav.active = 1; topnav_paint();
 }
 static void topnav_flush(int drop) { if (topNav.want < 0) return; int w = topNav.want; topNav.want = -1; if (drop) return; topNav.idx = -1; topnav_switch(w); }
-static void topnav_enter_content(void) {
+static void topnav_enter_content(void) { profFoc = 0;
   topNav.active = 0; Scr t = chipScr(topNav.idx);
   extern void board_from_bar(void), lib_from_bar(void);
   if (SCR == SCR_HOME || SCR == SCR_DISC) board_from_bar();   /* a board: its first row (Discover: its spotlight) */
@@ -366,10 +381,16 @@ static void topnav_nudge(void) { nudge_start(&topNav.nudge, K_UP); }
 /* the pill leaves on the key press; the screen follows once the remote rests (150 ms): building a screen in
    the same moment starves the slide, and passing through a tab on the way to another one no longer builds it */
 static int topnav_key(int k) {
+  if (profFoc) { /* the profile: OK opens the profiles, Left back to the tabs, Down into the page */
+    if (k == K_OK) { profFoc = 0; profiles_open(PF_SWITCH); return 1; }
+    if (k == K_LEFT) { profFoc = 0; topnav_paint(); return 1; }
+    if (k == K_DOWN) { profFoc = 0; topnav_enter_content(); return 1; }
+    nudge_start(&topNav.nudge, k); return 1; }
   if (update_pill_key(k, topNav.idx == NAV_SET)) { topnav_paint(); return 1; }
   topnav_paint();
   if (k == K_LEFT || k == K_RIGHT) {
     int i = topNav.idx + (k == K_RIGHT ? 1 : -1); if (i < 0) i = 0; if (i > 4) i = 4;
+    if (i == topNav.idx && k == K_RIGHT && i == NAV_LIB && acct_is_nuvio() && !app_rtl()) { topnav_flush(0); profFoc = 1; topnav_paint(); return 1; }
     if (i == topNav.idx) { nudge_start(&topNav.nudge, k); return 1; } /* the end of the bar */
     Scr t = chipScr(i);
     if ((t == SCR_SEARCH || t == SCR_SET) && SCR != t) { topnav_flush(1); topNav.idx = i; topnav_paint(); return 1; }
@@ -512,7 +533,7 @@ void topnav_draw(void) {
   }
   if (lift < 0) gfx_offset_pop();
   if (rv < 1) gfx_opacity_pop();
-  lglass_light(0); if (!welcome_is_open()) { float ck = 1 - pg; if (ck < 1) gfx_opacity_push(ck); if (lift < 0) gfx_offset_push(0, lift); clock_draw(); if (lift < 0) gfx_offset_pop(); if (ck < 1) gfx_opacity_pop(); } /* the clock: never faded in with the page (it stays where it is through signing in, the start screen and the guide); away only with the bar for a trailer or the reviews */
+  lglass_light(0); if (!welcome_is_open()) { float ck = 1 - pg; if (ck < 1) gfx_opacity_push(ck); if (lift < 0) gfx_offset_push(0, lift); if (SCR != SCR_LOGIN) prof_draw(); clock_draw(); if (lift < 0) gfx_offset_pop(); if (ck < 1) gfx_opacity_pop(); } /* the clock: never faded in with the page (it stays where it is through signing in, the start screen and the guide); away only with the bar for a trailer or the reviews */
 }
 void app_clock_top(void) { if (splash_signed_in() || welcome_is_open()) { lglass_light(0); clock_draw(); } } /* over the start screen and the guide: the same clock, in its place
 

@@ -22,6 +22,7 @@ typedef struct { char title[96], type[16], url[512], key[48], path[512], extra[2
 
 int  sb_init(void);
 /* ---- account ---- */
+int  acct_is_nuvio(void);             /* the account in use is a Nuvio one (core/nuvio.c); otherwise everything below is Stremio's */
 int  sb_signed_in(void);
 const char *sb_auth_key(void);
 const char *sb_user_email(void);
@@ -92,6 +93,7 @@ void lib_save(cJSON *lit);              /* mtime, store, push */
 /* force = push to the account now (pause, close, end); otherwise at most once a minute */
 void lib_set_progress(const char *id, const Item *it, const char *vid, double timeOffsetMs, double durationMs, int force);
 void lib_invalidate(void);
+void lib_commit(void);                  /* many items changed in place: one version bump, one save */
 unsigned lib_version(void);             /* bumps on every change: boards rebuild when it moves */
 
 /* ---- streams ---- */

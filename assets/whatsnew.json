@@ -3,8 +3,8 @@
   "items": [
     {
       "icon": "wn_new",
-      "title": "Completely renovated",
-      "text": "Rebuilt as a native app. Fast to open, smooth to move."
+      "title": "Nuvio accounts and profiles",
+      "text": "Sign in with Stremio or Nuvio. Nuvio profiles keep their own library, addons and picks."
     },
     {
       "icon": "wn_best",
@@ -14,7 +14,7 @@
     {
       "icon": "wn_cast",
       "title": "Cast from your phone",
-      "text": "Your TV shows up on your phone. Launch the app, play and control it directly. The Android app arrives soon."
+      "text": "Your TV shows up on your phone. Launch the app, play and control it directly."
     },
     {
       "icon": "wn_people",

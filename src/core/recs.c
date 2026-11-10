@@ -8,6 +8,8 @@
 #include "core/net.h"
 #include "core/store.h"
 #include "core/tmdb.h"
+#include "core/stremio.h"
+#include "core/nuvio.h"
 #include "platform/plat.h"
 #include <pthread.h>
 #include <stdio.h>
@@ -69,6 +71,7 @@ static unsigned fnv(const char *s) { unsigned h = 2166136261u; while (*s) h = (h
 static unsigned settings_sig(char *buf, size_t cap) {
   char au[4]; audio_code(au);
   snprintf(buf, cap, "%s|%s|%s|%s|%d|%d|%s", recs_region(), store_get("recsLangs", ""), au, store_get("enableDefaultAudioTrack", "true"), recs_hide_cinema(), recs_on(), i18n_lang());
+  if (acct_is_nuvio() && nv_profile_current()) { size_t l = strlen(buf); char s[160]; nv_scope(nv_profile_current(), s, sizeof s); snprintf(buf + l, cap - l, "|%s", s); } /* each profile its own page (a Stremio account: as it always was) */
   return fnv(buf);
 }
 
@@ -85,7 +88,7 @@ static unsigned settings_sig(char *buf, size_t cap) {
    ===================================================================================================== */
 typedef struct Want { struct Want *next; unsigned gen; int tag, low; char path[400]; } Want;
 typedef struct Msg { struct Msg *next; int type, status, tag; unsigned gen; unsigned char *body; size_t len; void *p; } Msg;
-enum { MG_NOP, MG_LOAD, MG_RUN, MG_RESP, MG_SAVE, MG_MIG };
+enum { MG_NOP, MG_LOAD, MG_RUN, MG_RESP, MG_SAVE, MG_MIG, MG_DROP };
 static pthread_mutex_t mu = PTHREAD_MUTEX_INITIALIZER; static pthread_cond_t cv = PTHREAD_COND_INITIALIZER;
 static Msg *inH, *inT; static Want *wH; static unsigned gen = 1; static int workerOn;
 static unsigned gen_now(void) { return __atomic_load_n(&gen, __ATOMIC_ACQUIRE); }
@@ -132,6 +135,9 @@ static void id_add(unsigned key, unsigned num, int dig) {
   if ((unsigned)(idn + 1) * 2 > idhn) id_hash_build(); else { unsigned i = hash32(key) & (idhn - 1); while (idh[i]) i = (i + 1) & (idhn - 1); idh[i] = idn; }
 }
 static int id_tmdb_of(unsigned num, int tv) { for (int j = idn - 1; j >= 0; j--) if (idr[j].num == num && (int)(idr[j].key & 1) == tv) return (int)(idr[j].key >> 1); return 0; } /* (a seed: a scan of a few thousand at most, once per seed) */
+static char pageName[220] = "recspage.bin"; /* (under mu: W reads it) */
+static void page_file(char *out, size_t cap) { pthread_mutex_lock(&mu); snprintf(out, cap, "%s", pageName); pthread_mutex_unlock(&mu); }
+static void page_file_set(void) { char n[220] = "recspage.bin"; if (acct_is_nuvio() && nv_profile_current()) { char s[160]; nv_scope(nv_profile_current(), s, sizeof s); snprintf(n, sizeof n, "acct/%s.page.bin", s); } pthread_mutex_lock(&mu); snprintf(pageName, sizeof pageName, "%s", n); pthread_mutex_unlock(&mu); }
 static char *dpath(const char *name, char *out, size_t cap) { snprintf(out, cap, "%s/%s", store_data_dir(), name); return out; }
 /* written beside and renamed over: a crash keeps the old file */
 static int file_put(const char *path, const void *a, size_t na, const void *b, size_t nb, const void *c, size_t nc) {
@@ -184,10 +190,10 @@ static void page_save_cur(void) {
   if (b) { unsigned char *q = b; memcpy(q, &p->h, sizeof(PHdr)); q += sizeof(PHdr); memcpy(q, p->rows, sizeof(PRow) * (size_t)p->h.nrows); q += sizeof(PRow) * (size_t)p->h.nrows;
     memcpy(q, p->cards, sizeof(PCard) * (size_t)p->h.ncards); q += sizeof(PCard) * (size_t)p->h.ncards; memcpy(q, p->blob, p->h.blobLen); }
   pthread_mutex_unlock(&mu);
-  if (b) { char path[1300]; file_put(dpath("recspage.bin", path, sizeof path), b, n, NULL, 0, NULL, 0); free(b); }
+  if (b) { char path[1300], name[220]; page_file(name, sizeof name); file_put(dpath(name, path, sizeof path), b, n, NULL, 0, NULL, 0); free(b); }
 }
 static Page *page_load(unsigned sig, long maxAge) {
-  char path[1300]; FILE *f = fopen(dpath("recspage.bin", path, sizeof path), "rb"); if (!f) return NULL; PHdr h; Page *p = NULL;
+  char path[1300], name[220]; page_file(name, sizeof name); FILE *f = fopen(dpath(name, path, sizeof path), "rb"); if (!f) return NULL; PHdr h; Page *p = NULL;
   if (fread(&h, sizeof h, 1, f) != 1 || h.magic != PG_MAGIC || h.ver != 1 || h.sig != sig || h.nrows < 0 || h.nrows > RECS_PAGE_MAX || h.ncards < 0 || h.ncards > PG_CARDS || h.nbill < 0 || h.nbill > h.ncards ||
       h.blobLen < 2 || h.blobLen > (8u << 20) || h.at > (long long)time(NULL) + 86400 || (long long)time(NULL) - h.at > maxAge) goto out;
   p = page_alloc(h.nrows, h.ncards, h.blobLen); if (!p) goto out; p->h = h;
@@ -301,6 +307,7 @@ void recs_dismiss(const Item *it) {
 /* =====================================================================================================
    W: the run
    ===================================================================================================== */
+static unsigned loadWant; /* the saved page asked for last (another profile since: an older answer is dropped) */
 static int wbusy, wquiet, wlastOk, loadState;   /* set by W, read by M with atomics (loadState: 0 asked, 1 nothing usable, 2 page in) */
 typedef struct { char imdb[16]; char tk; double w, age; } GSeed;
 typedef struct { unsigned gen, sig; long today; char region[8], explicitL[48], regionL[48], audio[4]; int hideCinema, lowMem, nseeds, ndis, *dis; GSeed seeds[RECS_MAX_SEEDS]; } RunCfg;
@@ -482,6 +489,7 @@ out:
 typedef struct { IdRec *r; int n; } Mig;
 static void do_load(const Msg *m) {
   Page *p = page_load(m->gen, m->tag);
+  if (m->gen != __atomic_load_n(&loadWant, __ATOMIC_ACQUIRE)) { free(p); return; }
   if (p) { id_load(); for (int k = 0; k < p->h.ncards; k++) { PCard *c = &p->cards[k]; if (!c->imdb && !(c->flags & CF_NOID)) { const IdRec *r = id_find(ckey(c->kind ? 't' : 'm', c->tmdb)); if (r) { c->imdb = r->num; c->dig = (unsigned char)r->dig; } } if (c->imdb) page_ix_add(p, k); }
     id_free();
     pthread_mutex_lock(&mu); Page *old = cur; cur = p; pageAt = (long)p->h.at; pthread_mutex_unlock(&mu); free(old); ver_bump(); }
@@ -494,6 +502,7 @@ static void *worker_main(void *a) {
     Msg *m = msg_take();
     switch (m->type) {
       case MG_LOAD: do_load(m); break;
+      case MG_DROP: { pthread_mutex_lock(&mu); Page *old = cur; cur = NULL; pageAt = 0; pthread_mutex_unlock(&mu); free(old); ver_bump(); break; }
       case MG_RUN: { RunCfg *c = m->p; int ok = c->gen == gen_now() ? run(c) : 0; __atomic_store_n(&wlastOk, ok, __ATOMIC_RELEASE); free(c->dis); free(c); __atomic_store_n(&wquiet, 0, __ATOMIC_RELEASE); __atomic_store_n(&wbusy, 0, __ATOMIC_RELEASE); break; }
       case MG_SAVE: page_save_cur(); break;
       case MG_MIG: do_mig(m->p); break;
@@ -601,9 +610,15 @@ void recs_status(char *out, size_t cap) {
   else if (mins < 60) snprintf(out, cap, "%s %d %s, %ld %s", T("On."), picks, T("picks on Home"), mins, T("min ago"));
   else snprintf(out, cap, "%s %d %s, %ld %s", T("On."), picks, T("picks on Home"), mins / 60, T("h ago"));
 }
+static unsigned sigSer; static char sigNow[200];
+void recs_account_changed(void) {
+  if (phase == 2) cancel_run(); phase = 0; force = 0; libAt = 0; loaded = 0; __atomic_store_n(&loadState, 0, __ATOMIC_RELEASE);
+  sigSer = store_serial(); curSig = settings_sig(sigNow, sizeof sigNow); __atomic_store_n(&loadWant, curSig, __ATOMIC_RELEASE); page_file_set(); /* the new profile's own page is read in the next tick: not a change of settings */
+  if (workerOn) msg_post_type(MG_DROP, NULL);
+}
 void recs_tick(void) {
-  { static unsigned ser; static char sig[200]; if (store_serial() != ser) { ser = store_serial(); char s2[200]; unsigned h = settings_sig(s2, sizeof s2);
-      if (sig[0] && strcmp(s2, sig)) recs_refresh(); snprintf(sig, sizeof sig, "%s", s2); curSig = h; } } /* a setting changed (Settings writes the store): ask again */
+  { if (store_serial() != sigSer) { sigSer = store_serial(); char s2[200]; unsigned h = settings_sig(s2, sizeof s2);
+      if (sigNow[0] && strcmp(s2, sigNow)) recs_refresh(); snprintf(sigNow, sizeof sigNow, "%s", s2); curSig = h; } } /* a setting changed (Settings writes the store): ask again */
   double now = app_now();
   if (workerOn) pump_wants();
   if (migState != 2 && app_splash_done && app_idle() >= 0.5f) { worker_start(); if (workerOn) mig_step(); }
@@ -612,7 +627,7 @@ void recs_tick(void) {
   if (phase == 2 && !__atomic_load_n(&wbusy, __ATOMIC_ACQUIRE)) { phase = 0; if (!force) startAt = now + (__atomic_load_n(&wlastOk, __ATOMIC_ACQUIRE) ? RESULT_AGE : 300); }
   if (!on) { if (phase == 2) cancel_run(); else phase = 0; return; }
   if (!loaded) { worker_start(); if (!workerOn) return; loaded = 1; loadT0 = now; startAt = now + 4; libSeen = lib_version();
-    Msg *m = calloc(1, sizeof *m); if (m) { m->type = MG_LOAD; m->gen = curSig; m->tag = RESULT_AGE * 4; msg_post(m); } else loadState = 1; }   /* the saved page: read by W, no parse here */
+    Msg *m = calloc(1, sizeof *m); if (m) { m->type = MG_LOAD; m->gen = curSig; m->tag = RESULT_AGE * 4; page_file_set(); __atomic_store_n(&loadWant, curSig, __ATOMIC_RELEASE); msg_post(m); } else loadState = 1; }   /* the saved page: read by W, no parse here */
   if (loaded == 1 && __atomic_load_n(&loadState, __ATOMIC_ACQUIRE)) { loaded = 2; if (loadState == 2 && !force && startAt < loadT0 + 20) startAt = loadT0 + 20; }   /* a saved page: asking again waits for Home */
   if (!recs_paused() && lib_version() != libSeen) { libSeen = lib_version(); libAt = now + 30; } /* watched something: again in 30 s (one change, not each progress save) */
   if (libAt && now >= libAt && (phase != 2 || __atomic_load_n(&wquiet, __ATOMIC_ACQUIRE))) { libAt = 0; force = 1; startAt = now; if (phase == 2) cancel_run(); else phase = 0; }

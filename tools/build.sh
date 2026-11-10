@@ -53,9 +53,9 @@ if os.path.isfile(src):
 def arr(name):
     v = kv.get(name, '').encode(); pad = hashlib.sha256(b'sb:' + name.encode()).digest()
     return 'static const unsigned char SBK_%s[] = { %s0 }, SBK_%s_PAD[32] = { %s };\n#define SBK_%s_LEN %d\n' % (name, ''.join('%d,' % (c ^ pad[i % 32]) for i, c in enumerate(v)), name, ','.join(str(x) for x in pad), name, len(v))
-body = '/* made by tools/build.sh from the private keys file: never commit */\n' + arr('TRAKT_CLIENT_ID') + arr('TMDB_API_KEY')
+body = '/* made by tools/build.sh from the private keys file: never commit */\n' + arr('TRAKT_CLIENT_ID') + arr('TMDB_API_KEY') + ''.join(arr(n) for n in ('NUVIO_SUPABASE_URL', 'NUVIO_SUPABASE_FALLBACK_URL', 'NUVIO_SUPABASE_ANON_KEY', 'DEVICE_LOGIN_WEB_BASE_URL'))
 if not os.path.isfile(out) or open(out).read() != body: open(out, 'w').write(body)
-print('== keys built in: %s' % (', '.join(n for n in ('TRAKT_CLIENT_ID', 'TMDB_API_KEY') if kv.get(n)) or 'none (%s)' % src))
+print('== keys built in: %s' % (', '.join(n for n in ('TRAKT_CLIENT_ID', 'TMDB_API_KEY', 'NUVIO_SUPABASE_URL') if kv.get(n)) or 'none (%s)' % src))
 PY
 CFLAGS="$CFLAGS -I$B"
 

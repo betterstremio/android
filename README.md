@@ -14,7 +14,7 @@
 
 <p align="center"><em>Stremio™ is a trademark of its owner. This project is independent and unofficial, and is not affiliated with, endorsed by or sponsored by Stremio. The name only describes compatibility.</em></p>
 
-You bring your own Stremio account and your own addons. The app ships empty, hosts and indexes nothing, and plays only the stream links your addons return.
+You bring your own Stremio or Nuvio account and your own addons. The app ships empty, hosts and indexes nothing, and plays only the stream links your addons return.
 
 ## What it does
 
@@ -40,7 +40,8 @@ Settings > For You > Preview on focus also offers The title itself: the film, pa
 **Browsing**
 - Home, Discover, Library and Search from your addons, with artwork, logos, people and reviews
 - Collections, imported from your phone
-- Library, watched state and Continue Watching synced with your Stremio account
+- Library, watched state and Continue Watching synced with your Stremio or Nuvio account
+- Nuvio profiles: "Who's watching?" at start, PIN locks, each profile with its own addons, library and For You rows
 - Made for a remote: the arrows, OK and Back do everything
 - 11 languages, including Arabic (right to left)
 - Updates from inside the app
@@ -68,7 +69,7 @@ Android 7.0 or later, on ARM (64-bit or 32-bit). One APK for TVs and phones.
 2. Allow installs from the app you open it with. Android asks the first time.
    - On a TV, the Downloader app can fetch the APK from the release link and install it. On Fire TV, first turn on Settings > My Fire TV > Developer options > Install unknown apps for Downloader.
    - On a phone, open the downloaded file.
-3. Open the app and sign in by scanning the code with your phone, or with your email.
+3. Open the app, choose Stremio or Nuvio at the top, and sign in by scanning the code with your phone, or with your email.
 
 ### Updates
 Settings > About shows a new version when there is one. The app downloads it and checks its SHA-256 before installing.

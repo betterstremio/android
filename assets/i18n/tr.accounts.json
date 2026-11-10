@@ -1,0 +1,19 @@
+{
+"Who’s watching?": "Kim izliyor?",
+"PIN": "PIN",
+"Enter PIN": "PIN’i girin",
+"Wrong PIN": "Yanlış PIN",
+"Your Nuvio session ended. Sign in again": "Nuvio oturumunuz sona erdi. Yeniden oturum açın",
+"Switch profile": "Profil değiştir",
+"See who’s watching": "Kimin izlediğini gör",
+"Ask who’s watching at start": "Başlarken kimin izlediğini sor",
+"Off: straight into the last profile": "Kapalı: doğrudan son profil",
+"Profile": "Profil",
+"Your Nuvio profiles": "Nuvio profilleriniz",
+"Couldn’t load your profiles": "Profiller yüklenemedi",
+"Couldn’t check the PIN": "PIN doğrulanamadı",
+"Couldn’t get a sign-in code": "Oturum açma kodu alınamadı",
+"Couldn’t reach Nuvio": "Nuvio’ya ulaşılamıyor",
+"Wrong email or password": "E-posta veya parola yanlış",
+"signed out": "oturum kapatıldı"
+}

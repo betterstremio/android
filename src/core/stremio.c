@@ -7,6 +7,7 @@
 #include "core/json.h"
 #include "core/i18n.h"
 #include "core/addons.h"
+#include "core/nuvio.h"
 #include "core/best.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -49,9 +50,10 @@ static void replace_in(char *s, size_t cap, const char *from, const char *to) {
 /* ---- account ------------------------------------------------------------------------------ */
 int sb_init(void) { return 1; }
 const char *sb_auth_key(void) { return store_get("authKey", NULL); }
-int sb_signed_in(void) { return sb_auth_key() != NULL; }
-const char *sb_user_email(void) { return js_str(store_node("user"), "email", ""); }
-const char *sb_user_id(void) { return js_str(store_node("user"), "_id", ""); }
+int acct_is_nuvio(void) { return !strcmp(store_get("acctKind", ""), "nuvio"); }
+int sb_signed_in(void) { if (acct_is_nuvio()) return nv_signed_in() && nv_profile_current() > 0; return sb_auth_key() != NULL; }
+const char *sb_user_email(void) { if (acct_is_nuvio()) return nv_email(); return js_str(store_node("user"), "email", ""); }
+const char *sb_user_id(void) { if (acct_is_nuvio()) return nv_user_key(); return js_str(store_node("user"), "_id", ""); }
 typedef struct { SbCb cb; void *ud; } CbBox;
 static void on_login(int st, const unsigned char *b, size_t n, void *ud) {
   CbBox *x = ud; cJSON *j = st == 200 ? net_json(b) : NULL; const cJSON *r = js_obj(j, "result");
@@ -78,6 +80,7 @@ void sb_finish_login(const char *ak, SbCb cb, void *ud) {
   net_post_json(STREMIO_API "/api/getUser", body, on_user, x); free(body);
 }
 void sb_logout(void) {
+  if (acct_is_nuvio()) { nv_logout(); return; }
   const char *ak = sb_auth_key();
   if (ak) { cJSON *o = cJSON_CreateObject(); cJSON_AddStringToObject(o, "authKey", ak); char *body = cJSON_PrintUnformatted(o); cJSON_Delete(o); net_post_json(STREMIO_API "/api/logout", body, NULL, NULL); free(body); }
   sb_forget_local();
@@ -101,6 +104,7 @@ static void on_addons(int st, const unsigned char *b, size_t n, void *ud) {
   net_json_free(j); if (x->cb) x->cb(changed, x->ud); free(x);
 }
 void sb_sync_addons(void (*cb)(int, void *), void *ud) {
+  if (acct_is_nuvio()) { nv_sync_addons(cb, ud); return; }
   const char *ak = sb_auth_key(); if (!ak) { if (cb) cb(0, ud); return; }
   cJSON *o = cJSON_CreateObject(); cJSON_AddStringToObject(o, "authKey", ak); cJSON_AddBoolToObject(o, "update", 1); char *body = cJSON_PrintUnformatted(o); cJSON_Delete(o);
   ChBox *x = malloc(sizeof *x); x->cb = cb; x->ud = ud; net_post_json(STREMIO_API "/api/addonCollectionGet", body, on_addons, x); free(body);
@@ -384,8 +388,10 @@ cJSON *lib_all(void) { return lib_arr(); }
 cJSON *lib_get(const char *id) { return cJSON_GetObjectItemCaseSensitive(lib_arr(), id); }
 int lib_has(const char *id) { cJSON *it = lib_get(id); return it && !js_bool(it, "removed", 1); }
 void lib_invalidate(void) { libVer++; }
+void lib_commit(void) { libVer++; store_set_node("lib", store_node("lib")); }
 unsigned lib_version(void) { return libVer; }
 static void push_item(cJSON *it) {
+  if (acct_is_nuvio()) { nv_push_soon(); return; } /* Nuvio takes whole lists: the next sync carries it */
   const char *ak = sb_auth_key(); if (!ak) return;
   cJSON *o = cJSON_CreateObject(); cJSON_AddStringToObject(o, "authKey", ak); cJSON_AddStringToObject(o, "collection", "libraryItem"); cJSON *ch = cJSON_CreateArray(); cJSON_AddItemToArray(ch, cJSON_Duplicate(it, 1)); cJSON_AddItemToObject(o, "changes", ch);
   char *body = cJSON_PrintUnformatted(o); cJSON_Delete(o); net_post_json(STREMIO_API "/api/datastorePut", body, NULL, NULL); free(body);
@@ -499,6 +505,8 @@ void lib_ep_watched_map(const cJSON *lit, const cJSON *videos, int *flags) {
             /* map back from ordered ids to the videos' order */
             int k = 0; const cJSON *v; cJSON_ArrayForEach(v, videos) { const char *id = js_str(v, "id", ""); for (int i = 0; i < nid; i++) if (w[i] && !strcmp(ids[i], id)) { flags[k] = 1; break; } k++; } } } } }
   }
+  { const cJSON *ne = js_arr(s, "nvEps"); if (ne && cJSON_GetArraySize(ne)) { int k = 0; const cJSON *v; cJSON_ArrayForEach(v, videos) { const cJSON *se = cJSON_GetObjectItemCaseSensitive(v, "season"), *ep = cJSON_GetObjectItemCaseSensitive(v, "episode");
+      if (cJSON_IsNumber(se) && cJSON_IsNumber(ep)) { char key[24]; snprintf(key, sizeof key, "%d:%d", (int)se->valuedouble, (int)ep->valuedouble); const cJSON *e; cJSON_ArrayForEach(e, ne) if (cJSON_IsString(e) && !strcmp(e->valuestring, key)) flags[k] = 1; } k++; } } }
   const cJSON *we = js_arr(s, "watchedEpisodes"); if (we) { int k = 0; const cJSON *v; cJSON_ArrayForEach(v, videos) { const cJSON *e; cJSON_ArrayForEach(e, we) if (cJSON_IsString(e) && !strcmp(e->valuestring, js_str(v, "id", ""))) flags[k] = 1; k++; } }
 }
 static void ep_encode(cJSON *s, const cJSON *videos, const int *flags) {
@@ -512,6 +520,10 @@ void lib_set_eps_watched(cJSON *lit, const cJSON *videos, const char **epIds, in
   int nv = cJSON_GetArraySize(videos); static int flags[1024]; lib_ep_watched_map(lit, videos, flags);
   int k = 0; const cJSON *v; cJSON_ArrayForEach(v, videos) { const char *id = js_str(v, "id", ""); for (int i = 0; i < n; i++) if (!strcmp(epIds[i], id)) flags[k] = on; k++; }
   cJSON *s = cJSON_GetObjectItemCaseSensitive(lit, "state"); ep_encode(s, videos, flags);
+  if (acct_is_nuvio()) { cJSON *ne = cJSON_GetObjectItemCaseSensitive(s, "nvEps"); if (!cJSON_IsArray(ne)) { cJSON_DeleteItemFromObjectCaseSensitive(s, "nvEps"); ne = cJSON_AddArrayToObject(s, "nvEps"); }
+    while (cJSON_GetArraySize(ne)) cJSON_DeleteItemFromArray(ne, 0); /* the whole list again from the flags: Nuvio's watched rows come from it */
+    int k2 = 0; const cJSON *v2; cJSON_ArrayForEach(v2, videos) { const cJSON *se = cJSON_GetObjectItemCaseSensitive(v2, "season"), *ep = cJSON_GetObjectItemCaseSensitive(v2, "episode");
+      if (flags[k2] && cJSON_IsNumber(se) && cJSON_IsNumber(ep) && se->valuedouble > 0) { char key[24]; snprintf(key, sizeof key, "%d:%d", (int)se->valuedouble, (int)ep->valuedouble); cJSON_AddItemToArray(ne, cJSON_CreateString(key)); } k2++; } }
   if (on) { char iso[40]; now_iso(iso, sizeof iso); cJSON_DeleteItemFromObjectCaseSensitive(s, "lastWatched"); cJSON_AddStringToObject(s, "lastWatched", iso);
     const char *cur = js_str(s, "video_id", ""); for (int i = 0; i < n; i++) if (!strcmp(epIds[i], cur)) { cJSON_DeleteItemFromObjectCaseSensitive(s, "timeOffset"); cJSON_AddNumberToObject(s, "timeOffset", 0); } }
   (void)nv; lib_save(lit);
@@ -526,7 +538,7 @@ void lib_set_movie_watched(cJSON *lit, int on) {
 int lib_movie_watched(const cJSON *l) { const cJSON *s = js_obj(l, "state"); if (!s) return 0; if (js_num(s, "timesWatched", 0) > 0) return 1;
   const cJSON *we = js_arr(s, "watchedEpisodes"), *e; const char *id = js_str(l, "_id", ""); if (we) cJSON_ArrayForEach(e, we) if (cJSON_IsString(e) && !strcmp(e->valuestring, id)) return 1; return 0; }
 int lib_series_watched(const cJSON *l, const cJSON *videos) {
-  const cJSON *s = js_obj(l, "state"); if (!s || (!js_str(s, "watched", "")[0] && !js_arr(s, "watchedEpisodes"))) return 0; if (!videos || !cJSON_GetArraySize(videos)) return 0;
+  const cJSON *s = js_obj(l, "state"); if (!s || (!js_str(s, "watched", "")[0] && !js_arr(s, "watchedEpisodes") && !cJSON_GetArraySize(js_arr(s, "nvEps")))) return 0; if (!videos || !cJSON_GetArraySize(videos)) return 0;
   static int flags[1024]; lib_ep_watched_map(l, videos, flags); int k = 0, n = 0; const cJSON *v; time_t now = time(NULL);
   cJSON_ArrayForEach(v, videos) { const cJSON *se = cJSON_GetObjectItemCaseSensitive(v, "season"); if (!cJSON_IsNumber(se) || se->valuedouble == 0) { k++; continue; }
     const char *rel = js_str(v, "released", js_str(v, "firstAired", NULL)); double r = 0; if (rel) { cJSON tmp = { 0 }; tmp.type = cJSON_String; tmp.valuestring = (char *)rel; r = tms(&tmp); }
@@ -583,7 +595,7 @@ static int lib_migrate_legacy(void) {
     cJSON_DeleteItemFromObjectCaseSensitive(s, "watchedEpisodes"); lib_save(it); ch = 1; }
   return ch;
 }
-unsigned sb_lib_sync_age(void) { return libSyncT ? SDL_GetTicks() - libSyncT : 0xffffffffu; }
+unsigned sb_lib_sync_age(void) { if (acct_is_nuvio()) return nv_lib_sync_age(); return libSyncT ? SDL_GetTicks() - libSyncT : 0xffffffffu; }
 
 /* two-way sync with the account, newest _mtime wins */
 typedef struct { void (*cb)(int, void *); void *ud; int changed; char ids[500][64]; int nwant, at; } PullReq;
@@ -623,6 +635,7 @@ static void on_pull_meta(int st, const unsigned char *b, size_t n, void *ud) {
   net_json_free(j); pull_next(r);
 }
 void sb_pull_library(void (*cb)(int, void *), void *ud) {
+  if (acct_is_nuvio()) { nv_sync_library(cb, ud); return; }
   const char *ak = sb_auth_key(); if (!ak || libSyncing) { if (cb) cb(0, ud); return; }
   libSyncing = 1; libSyncT = SDL_GetTicks();
   cJSON *o = cJSON_CreateObject(); cJSON_AddStringToObject(o, "authKey", ak); cJSON_AddStringToObject(o, "collection", "libraryItem"); char *body = cJSON_PrintUnformatted(o); cJSON_Delete(o);
